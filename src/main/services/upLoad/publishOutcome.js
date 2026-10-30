@@ -1,11 +1,96 @@
 import maybeClosePublishWindow from "./closeWindow.js";
 import { capturePublishFailureScreenshot } from "./failureScreenshot.js";
 
-/** 点击发布后等待页面跳转的时长：平台发布成功会自动跳到成功页/列表页 */
-export const PUBLISH_NAVIGATE_WAIT_MS = 5000;
+/**
+ * 点击发布后的判定窗口（毫秒）。
+ *
+ * 旧实现是固定等 5 秒再比 URL，两个方向都会错：
+ *  - 平台慢（视频转码/审核排队）时 5 秒不够 → 把已发布误判成异常
+ *  - 平台不跳转只弹提示时 → 永远等到「发布异常」
+ * 改成分轮询，命中任一成功信号立即返回：URL 跳转 / 成功提示文案。
+ */
+export const PUBLISH_VERDICT_TIMEOUT_MS = 20000;
+
+/** 兼容旧调用方（外部按固定等待语义引用过） */
+export const PUBLISH_NAVIGATE_WAIT_MS = PUBLISH_VERDICT_TIMEOUT_MS;
 
 export const PUBLISH_ABNORMAL_MESSAGE =
-  "发布异常：点击发布后 5 秒页面地址未变化，可能未真正发布，请到平台确认";
+  "发布异常：20 秒内既未跳转成功页、也没出现成功提示，可能未真正发布，请到平台确认";
+
+/** 各平台发布/存稿成功后的页面提示文案（命中任一即视为成功信号） */
+const SUCCESS_TOAST_TEXTS = [
+  "发布成功",
+  "已发布",
+  "发表成功",
+  "上传成功",
+  "投稿成功",
+  "保存成功",
+  "已保存",
+  "草稿已保存",
+  "保存到草稿箱",
+];
+
+/**
+ * 穿透 shadow DOM 收集可见文本。
+ * 视频号正文与提示在 wujie 影子树里，document.body.innerText 取不到。
+ */
+const SHADOW_TEXT_JS = `() => {
+  const out = [];
+  const walk = (root) => {
+    try {
+      root.querySelectorAll('*').forEach((el) => {
+        if (el.shadowRoot) walk(el.shadowRoot);
+        const t = (el.childElementCount === 0 && el.textContent) ? el.textContent.trim() : '';
+        if (t) out.push(t);
+      });
+    } catch (e) {}
+  };
+  walk(document);
+  return out.join('\\n');
+}`;
+
+async function readPageText(page) {
+  try {
+    if (page && typeof page.evaluate === "function") {
+      const t = await page.evaluate(SHADOW_TEXT_JS);
+      return typeof t === "string" ? t : "";
+    }
+  } catch (_) {
+    /* 页面销毁/导航中，按空文本处理 */
+  }
+  return "";
+}
+
+/**
+ * 轮询等待发布成功信号。
+ * @returns {Promise<{ok: boolean, signal: string, urlAfter: string}>}
+ */
+async function waitForPublishSignal(page, urlBefore, timeoutMs) {
+  // 按轮次而不是墙钟计时：每轮含 1 秒等待，真实环境等价于 timeoutMs；
+  // 单测里 waitForTimeout 是空实现，也不会空转 20 秒。
+  const maxRounds = Math.max(2, Math.ceil(timeoutMs / 1000));
+  let urlAfter = readPageUrl(page);
+  for (let round = 0; round < maxRounds; round++) {
+    urlAfter = readPageUrl(page);
+    if (
+      urlBefore &&
+      urlAfter &&
+      normalizeUrl(urlAfter) !== normalizeUrl(urlBefore)
+    ) {
+      return { ok: true, signal: "url_changed", urlAfter };
+    }
+    const text = await readPageText(page);
+    if (text) {
+      for (const kw of SUCCESS_TOAST_TEXTS) {
+        if (text.includes(kw)) {
+          return { ok: true, signal: `toast:${kw}`, urlAfter };
+        }
+      }
+    }
+    await delay(page, 1000);
+  }
+  return { ok: false, signal: "none", urlAfter: readPageUrl(page) };
+}
 
 /** 安全读取当前页面地址，页面已销毁时返回空串 */
 export function readPageUrl(page) {
@@ -62,21 +147,37 @@ export async function replyPublishOutcome({
   successMessage = "上传成功",
   extraPayload = {},
   closeWindowData,
-  waitMs = PUBLISH_NAVIGATE_WAIT_MS,
+  waitMs = PUBLISH_VERDICT_TIMEOUT_MS,
 }) {
-  await delay(page, waitMs);
+  let urlAfter;
+  let abnormal = false;
+  let signal = "draft_skip";
+  if (isDraftMode) {
+    // 存草稿不跳转是平台常态，只记录不判定
+    await delay(page, waitMs);
+    urlAfter = readPageUrl(page);
+  } else {
+    const verdict = await waitForPublishSignal(page, urlBefore, waitMs);
+    urlAfter = verdict.urlAfter;
+    signal = verdict.signal;
+    abnormal = !verdict.ok && !!verdict.urlAfter;
+    console.log(
+      `[publish] ${data.pt || ""} 发布判定 signal=${signal} ${
+        abnormal ? "→ 异常" : verdict.ok ? "→ 成功" : "→ 无法判定（页面已销毁/读不到地址）"
+      }`
+    );
+  }
 
-  const urlAfter = readPageUrl(page);
   // 读不到地址（窗口已关/页面销毁）时不做异常判定，避免误报
   const urlUnchanged =
     !!urlBefore && !!urlAfter && normalizeUrl(urlAfter) === normalizeUrl(urlBefore);
-  const abnormal = !isDraftMode && urlUnchanged;
 
   const payload = {
     ...data,
     ...extraPayload,
     status: true,
     publishPageUrl: urlAfter,
+    publishSignal: signal,
     message: abnormal ? PUBLISH_ABNORMAL_MESSAGE : successMessage,
   };
   // 草稿模式不跳转，地址未变化属正常，不能据此判异常（发布模式的判定见下）。

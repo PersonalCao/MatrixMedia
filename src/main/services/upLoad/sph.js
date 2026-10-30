@@ -304,24 +304,119 @@ async function applySphCreativeStatement(page, value) {
   await page.waitForTimeout(400);
 }
 
-async function clickSphDraftButton(page) {
-  const draftBtn = await page.waitForSelector(
-    "wujie-app.wujie_iframe >>> .form-btns>div:first-child button",
-    { timeout: WAIT_SELECTOR_APPEAR_MS }
+/**
+ * 视频号发表/存草稿按钮的稳健点击。
+ *
+ * 事故背景（2026-10-30 查篇）：封面确认通过后 11ms 直接抛
+ * "Node is either not clickable or not an HTMLElement"，
+ * 视频与封面都已就绪，死在一次性 ElementHandle.click 上。
+ * 根因是 ElementHandle.click 先算 clickablePoint，元素被残留遮罩遮挡 /
+ * 处于滚动视口外 / 按钮仍 disabled 时直接抛错，没有第二次机会。
+ *
+ * 策略：等按钮真正可用(非 disabled 且可见) → 清遮挡 → 滚入视口 →
+ * 原生点击 → JS 派发兜底 → 坐标点击兜底，逐次退避，最多 8 轮。
+ */
+async function clickSphFormButton(page, selector, label) {
+  const btn = await page.waitForSelector(selector, {
+    timeout: WAIT_SELECTOR_APPEAR_MS,
+  });
+  if (!btn) throw new Error(`未找到视频号${label}按钮`);
+
+  // 等按钮可用：视频处理/封面裁剪未完成时按钮是 disabled 的，硬点必然失败
+  for (let i = 0; i < 60; i++) {
+    const state = await btn
+      .evaluate((el) => ({
+        disabled: !!el.disabled || el.getAttribute("aria-disabled") === "true",
+        visible: !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length),
+      }))
+      .catch(() => null);
+    if (state && !state.disabled && state.visible) break;
+    if (i === 59) {
+      throw new Error(`视频号${label}按钮 60 秒内始终不可用（disabled 或不可见）`);
+    }
+    await page.waitForTimeout(1000);
+  }
+
+  let lastErr = null;
+  for (let attempt = 1; attempt <= 8; attempt++) {
+    // 清可能遮挡按钮的遮罩/弹窗（封面弹窗关闭瞬间的残留 mask 是本案主嫌）
+    await page
+      .evaluate(() => {
+        [
+          ".mask",
+          ".common-dialog",
+          ".changeAccount-dialog",
+          ".weui-desktop-dialog__wrp",
+        ].forEach((sel) => {
+          document.querySelectorAll(sel).forEach((el) => el.remove());
+        });
+      })
+      .catch(() => {});
+    await btn
+      .evaluate((el) => el.scrollIntoView({ block: "center", inline: "center" }))
+      .catch(() => {});
+    await page.waitForTimeout(200);
+
+    // 首选：原生点击
+    try {
+      await btn.click({ delay: 120 });
+      await page.waitForTimeout(600);
+      return;
+    } catch (e) {
+      lastErr = e;
+    }
+
+    // 兜底一：JS 直接派发点击（元素被遮挡、但事件仍能触发时有效）
+    try {
+      const fired = await btn.evaluate((el) => {
+        el.click();
+        return true;
+      });
+      if (fired) {
+        await page.waitForTimeout(800);
+        return;
+      }
+    } catch (e) {
+      lastErr = e;
+    }
+
+    // 兜底二：按坐标点（元素可点，但 clickablePoint 判定失败）
+    try {
+      const box = await btn.boundingBox();
+      if (box && box.width > 0 && box.height > 0) {
+        await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+        await page.waitForTimeout(800);
+        return;
+      }
+    } catch (e) {
+      lastErr = e;
+    }
+
+    console.log(`[sph] ${label}按钮第 ${attempt} 轮点击未成功，退避重试`);
+    await page.waitForTimeout(400 * attempt);
+  }
+
+  throw new Error(
+    `视频号${label}按钮连续 8 轮点击失败: ${
+      lastErr && lastErr.message ? lastErr.message : lastErr
+    }`
   );
-  if (!draftBtn) throw new Error("未找到视频号保存草稿按钮");
-  await draftBtn.click({ delay: 200 });
-  await page.waitForTimeout(1000);
+}
+
+async function clickSphDraftButton(page) {
+  await clickSphFormButton(
+    page,
+    "wujie-app.wujie_iframe >>> .form-btns>div:first-child button",
+    "保存草稿"
+  );
 }
 
 async function clickSphPublishButton(page) {
-  const publishBtn = await page.waitForSelector(
+  await clickSphFormButton(
+    page,
     "wujie-app.wujie_iframe >>> .form-btns>div:last-child button",
-    { timeout: WAIT_SELECTOR_APPEAR_MS }
+    "发表"
   );
-  if (!publishBtn) throw new Error("未找到视频号发布按钮");
-  await publishBtn.click({ delay: 200 });
-  await page.waitForTimeout(1000);
 }
 
 async function waitSphUploadProcessing(page) {

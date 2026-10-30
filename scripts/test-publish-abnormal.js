@@ -169,6 +169,30 @@ function createEvent() {
     assert.strictEqual(event.calls[0].payload.publishAbnormal, undefined);
   }
 
+  // 5b. 地址未变但页面出现成功提示 → 判成功
+  // （2026-10 新增：视频号等平台点完不跳转、只弹提示，旧判据会误报异常）
+  {
+    const page = {
+      url: () => "https://x.com/publish",
+      waitForTimeout: async () => {},
+      evaluate: async () => "发布成功",
+    };
+    const event = createEvent();
+    await replyPublishOutcome({
+      page,
+      data: { pt: "视频号", closeWindowAfterPublish: false },
+      window: null,
+      event,
+      urlBefore: "https://x.com/publish",
+      waitMs: 0,
+      successMessage: "上传成功",
+    });
+    const payload = event.calls[0].payload;
+    assert.strictEqual(payload.publishAbnormal, undefined);
+    assert.strictEqual(payload.publishSignal, "toast:发布成功");
+    assert.strictEqual(payload.message, "上传成功");
+  }
+
   // 6. 结果映射：异常不计成功
   {
     const abnormal = resolvePublishCompletion({
