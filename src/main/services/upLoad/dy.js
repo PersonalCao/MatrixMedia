@@ -300,7 +300,17 @@ export default async function (page, data, window, event) {
     const uploadFileHandle = uploadInputs[uploadInputs.length - 1];
     await uploadFileHandle.uploadFile(path.resolve(data.filePath));
   } catch (e) {
+    // 上传失败必须阻断：文件没进上传区还继续填表点发布，会发出残缺作品
     console.error("❌ 输入文件失败", e);
+    await replyPublishFailure({
+      page,
+      data,
+      window,
+      event,
+      message: `抖音视频上传失败: ${(e && e.message) || String(e)}`,
+      closeWindow: true,
+    });
+    return;
   }
   try {
     const text = buildPlatformVideoText("抖音", data.data);
@@ -313,6 +323,14 @@ export default async function (page, data, window, event) {
     await input.click({ clickCount: 3 }); // 三击全选
     await page.keyboard.press("Backspace"); // 删除内容
     await page.type(".semi-input", text.title, { delay: 50 });
+    // 回读校验：标题空写不能放过（发布后才补不回来）
+    const typedTitle = await input
+      .evaluate((el) => String(el.value || el.textContent || "").trim())
+      .catch(() => "");
+    const titleHead = String(text.title || "").trim().slice(0, 8);
+    if (titleHead && !typedTitle.includes(titleHead)) {
+      throw new Error(`标题未写入（期望含「${titleHead}」，实得 ${typedTitle.length} 字）`);
+    }
 
     const input2 = await page.$(".zone-container.editor-kit-container");
     await input2.click(); // 三击全选
@@ -326,6 +344,15 @@ export default async function (page, data, window, event) {
     }
   } catch (e) {
     console.error("❌ 输入标题失败", e);
+    await replyPublishFailure({
+      page,
+      data,
+      window,
+      event,
+      message: `抖音标题/简介填写失败: ${(e && e.message) || String(e)}`,
+      closeWindow: true,
+    });
+    return;
   }
 
   try {

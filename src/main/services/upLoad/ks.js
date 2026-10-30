@@ -459,7 +459,18 @@ export default async function (page, data, window, event) {
     const uploadInputs = await page.$(sel);
     await uploadInputs.uploadFile(path.resolve(data.filePath));
   } catch (err) {
+    // 上传失败必须阻断：与描述填写（#34）保持同一策略，
+    // 文件没进上传区还继续往下走会发出残缺作品。
     console.error("文件上传失败:", err);
+    await replyPublishFailure({
+      page,
+      data,
+      window,
+      event,
+      message: `快手视频上传失败: ${(err && err.message) || String(err)}`,
+      closeWindow: true,
+    });
+    return;
   }
 
   // 描述（含标题拼接）填写：回读校验 + execCommand 兜底，失败抛错中止发布（#34）。

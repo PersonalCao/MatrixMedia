@@ -482,7 +482,19 @@ export default async function (page, data, window, event, onFinish) {
       el.dispatchEvent(new Event("change", { bubbles: true }));
     });
   } catch (err) {
+    // 上传失败必须阻断（2026-10 查篇事故复盘）：
+    // 文件没进上传区还继续填表、设封面、点发表，轻则按钮点不动
+    // （not clickable），重则发出残缺作品，而回执还可能记成功。
     console.error("❌ 文件上传失败:", err);
+    await replyPublishFailure({
+      page,
+      data,
+      window,
+      event,
+      message: `视频号视频上传失败: ${(err && err.message) || String(err)}`,
+      closeWindow: true,
+    });
+    return;
   }
 
   try {
@@ -495,6 +507,16 @@ export default async function (page, data, window, event, onFinish) {
     await titleInput.click();
     if (text.description) {
       await page.keyboard.type(text.description, { delay: 50 });
+      // 回读校验：输入法/焦点丢失会导致静默空写（涡篇 shortTitle 被拒的同类风险）
+      const typedDesc = await titleInput
+        .evaluate((el) => (el.innerText || el.textContent || "").trim())
+        .catch(() => "");
+      const head = String(text.description).trim().slice(0, 8);
+      if (head && !typedDesc.includes(head)) {
+        throw new Error(
+          `描述未写入（期望含「${head}」，实得 ${typedDesc.length} 字）`
+        );
+      }
     }
     const shortTitle = text.shortTitle;
     if (shortTitle) {
@@ -506,11 +528,24 @@ export default async function (page, data, window, event, onFinish) {
       await uploadInput2.click();
       let newBt = shortTitle.replace(/[，。、\/,;:!?'"()\[\]{}<>]/g, " ");
       await page.keyboard.type(newBt, { delay: 50 });
+      const stVal = await uploadInput2
+        .evaluate((el) => String(el.value || "").trim())
+        .catch(() => "");
+      if (!stVal) throw new Error("短标题未写入（输入框为空）");
     } else {
       console.log("视频号短标题未填写，跳过");
     }
   } catch (err) {
     console.error("❌ 输入失败:", err);
+    await replyPublishFailure({
+      page,
+      data,
+      window,
+      event,
+      message: `视频号描述/短标题填写失败: ${(err && err.message) || String(err)}`,
+      closeWindow: true,
+    });
+    return;
   }
 
   try {
