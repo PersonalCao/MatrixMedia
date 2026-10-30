@@ -437,7 +437,12 @@ export default async function (page, data, window, event) {
 
     const urlBefore = readPageUrl(page);
     await clickDyPublish(page, isDraftMode);
-    console.log(isDraftMode ? "✅ 抖音视频已保存草稿" : "✅ 抖音视频上传成功");
+    // 抖音网页端没有草稿箱：点击成功 ≠ 草稿已留底，回执必须如实标注（P1-4）
+    console.log(
+      isDraftMode
+        ? "✅ 抖音已点击存草稿（网页端无草稿箱，未能核验）"
+        : "✅ 抖音视频上传成功"
+    );
     await replyPublishOutcome({
       page,
       data,
@@ -445,7 +450,10 @@ export default async function (page, data, window, event) {
       event,
       urlBefore,
       isDraftMode,
-      successMessage: isDraftMode ? "保存草稿成功" : "上传成功",
+      successMessage: isDraftMode
+        ? "已点击存草稿（抖音网页端无草稿箱，无法核验）"
+        : "上传成功",
+      extraPayload: isDraftMode ? { draftUnverified: true } : {},
     });
   } catch (e) {
     const detail = (e && e.message) || String(e);

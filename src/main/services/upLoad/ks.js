@@ -335,11 +335,12 @@ async function selectKsCreativeStatement(page, data) {
   });
 
   if (!triggerInfo || !triggerInfo.ok) {
-    console.warn(
-      "未找到快手声明下拉触发器，跳过。当前页 form-item labels:",
-      JSON.stringify(triggerInfo && triggerInfo.labels)
+    // 不能静默跳过：调用方会依据「是否请求了声明」决定中止发布（P1-5）
+    throw new Error(
+      `未找到快手创作声明下拉触发器，当前 form-item labels: ${JSON.stringify(
+        (triggerInfo && triggerInfo.labels) || []
+      )}`
     );
-    return;
   }
   console.log("[ks] 找到下拉触发器, label =", triggerInfo.matchedLabel);
 
@@ -391,8 +392,8 @@ async function selectKsCreativeStatement(page, data) {
       label
     );
   } catch (e) {
-    console.warn("快手声明下拉项未出现:", e?.message || e);
-    return;
+    // 同上：下拉项没出现是硬失败，交给调用方决定是否中止（P1-5）
+    throw new Error(`快手创作声明下拉项未出现: ${e?.message || e}`);
   }
 
   // 3. 点选目标选项：点 .ant-select-item-option 本身（ant-design 在它上面绑定 mousedown）
@@ -492,10 +493,28 @@ export default async function (page, data, window, event) {
   }
 
   // 选择创作声明（快手只支持 AI 生成 / 演绎情节，其它值跳过）
+  // P1-5：请求了声明却没标上 = 发布未标注 AIGC 内容（合规风险），
+  // 与「封面失败必须中止」同策略：标不上就中止本次发布，不静默放行。
+  const statementRequested = !isCreativeStatementNone(
+    data.data && data.data.creativeStatement
+  );
   try {
     await selectKsCreativeStatement(page, data);
   } catch (e) {
-    console.warn("快手创作声明选择未完成:", e?.message || e);
+    const detail = (e && e.message) || String(e);
+    if (statementRequested) {
+      console.error("❌ 快手创作声明选择失败:", detail);
+      await replyPublishFailure({
+        page,
+        data,
+        window,
+        event,
+        message: `快手创作声明未成功标注: ${detail}`,
+        closeWindow: true,
+      });
+      return;
+    }
+    console.warn("快手创作声明选择未完成（本次未请求声明）:", detail);
   }
 
   try {
@@ -573,7 +592,7 @@ export default async function (page, data, window, event) {
     }
     console.log(
       isDraftMode
-        ? `✅ 快手视频已保存草稿，click via=${clicked.via}`
+        ? `✅ 快手已点击存草稿入口（网页端无草稿箱，未能核验），click via=${clicked.via}`
         : `✅ 快手视频已触发发布，click via=${clicked.via}`
     );
     await replyPublishOutcome({
@@ -583,7 +602,10 @@ export default async function (page, data, window, event) {
       event,
       urlBefore,
       isDraftMode,
-      successMessage: isDraftMode ? "保存草稿成功" : "上传成功",
+      successMessage: isDraftMode
+        ? "已点击取消发布/存草稿入口（快手网页端无草稿箱，无法核验）"
+        : "上传成功",
+      extraPayload: isDraftMode ? { draftUnverified: true } : {},
     });
   } catch (e) {
     // 失败瞬间截图留证（登录过期 / 风控弹窗 / 元素改版都能一眼看出）

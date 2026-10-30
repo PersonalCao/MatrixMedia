@@ -20,12 +20,16 @@ export function resolvePublishCompletion(payload) {
         payload.publishMode === "draft" ||
         payload.publishToDraft === true)
   );
+  const draftUnverified = Boolean(ok && payload.draftUnverified === true);
   return {
     ok,
     message,
     fallbackDraft,
     publishAbnormal,
     savedAsDraft,
+    // 存草稿结果无法核验（抖音/快手网页端无草稿箱）：点击成功但草稿不存在于任何地方。
+    // 这里不降级成失败（不触发自动重试，避免重复发布），只把语义说清楚。
+    draftUnverified,
     recordStatus: publishAbnormal
       ? "abnormal"
       : savedAsDraft

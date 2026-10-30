@@ -209,6 +209,28 @@ function createEvent() {
     const ok = resolvePublishCompletion({ status: true, message: "上传成功" });
     assert.strictEqual(ok.recordStatus, "success");
     assert.strictEqual(ok.exitCode, 0);
+    assert.strictEqual(ok.draftUnverified, false);
+
+    // 存草稿但平台无草稿箱（抖音/快手）：状态机仍是 draft、退出码 0，
+    // 但必须带 draftUnverified 标记，不能对外宣称"已保存草稿"
+    const unverifiedDraft = resolvePublishCompletion({
+      status: true,
+      publishMode: "draft",
+      draftUnverified: true,
+      message: "已点击存草稿（抖音网页端无草稿箱，无法核验）",
+    });
+    assert.strictEqual(unverifiedDraft.savedAsDraft, true);
+    assert.strictEqual(unverifiedDraft.recordStatus, "draft");
+    assert.strictEqual(unverifiedDraft.exitCode, 0);
+    assert.strictEqual(unverifiedDraft.draftUnverified, true);
+
+    // 视频号有真草稿箱，未带标记
+    const sphDraft = resolvePublishCompletion({
+      status: true,
+      publishMode: "draft",
+      message: "保存草稿成功",
+    });
+    assert.strictEqual(sphDraft.draftUnverified, false);
   }
 
   console.log("test-publish-abnormal: 全部断言通过");
