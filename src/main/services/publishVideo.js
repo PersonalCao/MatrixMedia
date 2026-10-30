@@ -7,6 +7,7 @@ import ptConfig from "../config/ptConfig";
 import { runPuppeteerTask } from "./puppeteerFile";
 import { changeData } from "../server/utils";
 import { createScheduledRecord } from "./scheduledPublish";
+import { findExistingScheduled } from "./scheduledDedupe.js";
 import { CLI_PUBLISH_TIMEOUT_MS } from "./upLoad/uploadTimeouts.js";
 import {
   isRemotePublishFile,
@@ -16,6 +17,28 @@ import {
 import { resolveAccountPublishMode } from "./accountPublishSettingsResolver.js";
 import { resolvePublishCompletion } from "../../shared/publishResult.js";
 import { normalizeVideoMetadata } from "../../shared/videoMetadata.js";
+
+/** 读取全部 pushData 记录（跨日期平铺），用于定时任务查重 */
+function listPushDataRecords() {
+  try {
+    const res = changeData({
+      fileName: "pushData",
+      type: "get",
+      item: { page: 1, pageSize: 10000 },
+    });
+    const data = (res && res.data) || {};
+    const rows = [];
+    Object.keys(data).forEach((date) => {
+      (data[date] || []).forEach((it) => {
+        if (it) rows.push({ ...it, date: it.date || date });
+      });
+    });
+    return rows;
+  } catch (e) {
+    console.warn("读取 pushData 失败，跳过定时任务查重:", e && e.message);
+    return [];
+  }
+}
 
 function fileStemFromSource(source) {
   const raw = String(source || "").trim();
@@ -232,6 +255,23 @@ async function runSingleFilePublishInner(
       };
     }
     try {
+      // 查重：同一视频在同一时刻只允许一条待触发任务，
+      // 否则重跑 --publish-at 会造出两条到期记录 → 触发时双发。
+      const existing = findExistingScheduled(listPushDataRecords(), scheduledRecord);
+      if (existing) {
+        console.log(
+          `[publish] 定时任务已存在（id=${existing.id}），跳过重复创建: ${scheduledRecord.scheduledPublishAtText}`
+        );
+        return {
+          exitCode: 0,
+          status: "scheduled",
+          scheduled: true,
+          duplicate: true,
+          id: existing.id || null,
+          publishAt: scheduledRecord.scheduledPublishAtText,
+          message: "同一视频在该时间点的定时任务已存在，未重复创建",
+        };
+      }
       const addRes = changeData({
         fileName: "pushData",
         type: "add",

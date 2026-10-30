@@ -9,6 +9,7 @@ import { changeData } from "../server/utils";
 import { normalizeCreativeStatement } from "../../shared/creativeStatement.js";
 import { isRemotePublishFile, resolvePublishFile } from "./resolvePublishFile";
 import { normalizeVideoRecordMetadata } from "../../shared/videoMetadata.js";
+import { scheduledKey } from "./scheduledDedupe.js";
 
 const MAX_TIMER_DELAY_MS = 24 * 60 * 60 * 1000;
 const REFRESH_INTERVAL_MS = 60 * 1000;
@@ -369,7 +370,16 @@ export function schedulePublishRecord(record, nowMs = Date.now()) {
 
 export function refreshScheduledPublishScheduler() {
   const nowMs = Date.now();
+  // 同一轮触发里同一任务只处理一次：历史数据里可能存在同键重复记录
+  // （isDuplicate 不覆盖 scheduledTask），这里做兜底防止双发。
+  const inFlight = new Set();
   listScheduledRecords().forEach((record) => {
+    const key = scheduledKey(record);
+    if (key && inFlight.has(key)) {
+      console.warn(`[scheduled] 同键任务已在本轮处理，跳过重复记录: ${key}`);
+      return;
+    }
+    if (key) inFlight.add(key);
     schedulePublishRecord(record, nowMs);
   });
 }
