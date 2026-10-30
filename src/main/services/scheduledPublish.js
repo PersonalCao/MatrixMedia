@@ -321,10 +321,12 @@ async function executeScheduledRecordAsync(record) {
             finishScheduledRecord(record, payload);
             finish();
           } else if (channel === "puppeteer-noLogin") {
+            // 登录失效单独标状态：任务本身没错，补扫码后可重新排期
             updateRecord(record, {
-              publishStatus: "failed",
-              publishFailCount: 1,
-              lastPublishMessage: "登录态异常或未登录",
+              publishStatus: "login_required",
+              publishFailCount: Number(record.publishFailCount || 0) + 1,
+              lastPublishMessage:
+                "登录态失效，需重新扫码登录后重排（本次未发布）",
               lastPublishAt: Date.now(),
             });
             finish();

@@ -21,6 +21,9 @@ export function resolvePublishCompletion(payload) {
         payload.publishToDraft === true)
   );
   const draftUnverified = Boolean(ok && payload.draftUnverified === true);
+  // 登录态失效：不是内容/流程失败，需要人重新扫码。单独给一个状态和退出码，
+  // 让流水线能区分「该重试/该补登录」和「内容有问题」。
+  const loginRequired = Boolean(payload && payload.loginRequired === true);
   return {
     ok,
     message,
@@ -30,22 +33,35 @@ export function resolvePublishCompletion(payload) {
     // 存草稿结果无法核验（抖音/快手网页端无草稿箱）：点击成功但草稿不存在于任何地方。
     // 这里不降级成失败（不触发自动重试，避免重复发布），只把语义说清楚。
     draftUnverified,
-    recordStatus: publishAbnormal
-      ? "abnormal"
-      : savedAsDraft
-        ? "draft"
-        : ok
-          ? "success"
-          : "failed",
-    status: publishAbnormal
-      ? "publish_abnormal"
-      : fallbackDraft
-        ? "needs_attention"
+    loginRequired,
+    recordStatus: loginRequired
+      ? "login_required"
+      : publishAbnormal
+        ? "abnormal"
         : savedAsDraft
           ? "draft"
           : ok
             ? "success"
             : "failed",
-    exitCode: publishAbnormal ? 4 : fallbackDraft ? 4 : ok ? 0 : 3,
+    status: loginRequired
+      ? "login_required"
+      : publishAbnormal
+        ? "publish_abnormal"
+        : fallbackDraft
+          ? "needs_attention"
+          : savedAsDraft
+            ? "draft"
+            : ok
+              ? "success"
+              : "failed",
+    exitCode: loginRequired
+      ? 5
+      : publishAbnormal
+        ? 4
+        : fallbackDraft
+          ? 4
+          : ok
+            ? 0
+            : 3,
   };
 }

@@ -414,8 +414,15 @@ async function runSingleFilePublishInner(
           }
           const message = (payload && payload.message) || "登录态异常或未登录";
           console.error("登录态异常或未登录:", JSON.stringify(payload));
-          updateRecord("failed", message);
-          finish({ exitCode: 3, status: "failed", message, id: recordId });
+          // 登录失效不是内容失败：单独状态 + 退出码 5，便于流水线提示"先补登录"
+          updateRecord("login_required", message);
+          finish({
+            exitCode: 5,
+            status: "login_required",
+            message,
+            id: recordId,
+            loginRequired: true,
+          });
         }
       },
     };

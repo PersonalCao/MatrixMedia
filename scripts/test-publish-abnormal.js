@@ -231,6 +231,23 @@ function createEvent() {
       message: "保存草稿成功",
     });
     assert.strictEqual(sphDraft.draftUnverified, false);
+
+    // 登录态失效：单独状态 + 退出码 5，不能混进普通失败（P2-8）
+    const needLogin = resolvePublishCompletion({
+      status: false,
+      loginRequired: true,
+      message: "视频号登录状态已失效，请重新登录后再试",
+    });
+    assert.strictEqual(needLogin.status, "login_required");
+    assert.strictEqual(needLogin.recordStatus, "login_required");
+    assert.strictEqual(needLogin.exitCode, 5);
+    assert.strictEqual(needLogin.loginRequired, true);
+
+    // 普通失败仍是 3，不被登录态吞掉
+    const plainFail = resolvePublishCompletion({ status: false, message: "上传失败" });
+    assert.strictEqual(plainFail.status, "failed");
+    assert.strictEqual(plainFail.exitCode, 3);
+    assert.strictEqual(plainFail.loginRequired, false);
   }
 
   console.log("test-publish-abnormal: 全部断言通过");
