@@ -19,7 +19,8 @@ MatrixMedia（matrix-video）是一个基于 Electron 的**自媒体矩阵发布
 3. PR 描述必须包含：**问题现象 → 根因 → 修复思路 → 验证方式**（跑了哪个测试 / 如何复现）
 4. **AI 生成或主要辅助的 PR，请在描述中声明所用工具**；声明不影响合并，隐瞒被发现会关 PR
 5. 不接受：格式化全仓库、纯依赖升级、无行为变化的"重构"、无法在代码中定位根因的"问题"
-6. **发布能力必须同时兼容 GUI / CLI / MCP 三条链路**：凡 GUI 可用的发布参数 / 元数据字段 / 回执语义，CLI 与 MCP 必须有等价入口（反之亦然，例如 GUI 的「自定义封面」对应 CLI `--cover`、MCP publish 的 cover 参数）；只改一条链路的 PR 需在描述里说明另一条为什么可以不动。同时不得破坏退出码契约与回执字段语义（以 `docs/cli.md` 为准），新增状态必须同步 GUI 展示、`cli history` 与文档
+6. **发布能力必须同时兼容并通过 GUI / CLI / MCP 三条链路测试**：凡 GUI 可用的发布参数 / 元数据字段 / 回执语义，CLI 与 MCP 必须有等价入口（反之亦然，例如 GUI 的「自定义封面」对应 CLI `--cover`、MCP publish 的 cover 参数）。**PR 必须附三条链路的测试证据**（CLI 命令行输出 / MCP tool 调用结果 / GUI 截图），只测一条链路的不予合并。同时不得破坏退出码契约与回执字段语义（以 `docs/cli.md` 为准），新增状态必须同步 GUI 展示、`cli history` 与文档
+7. **发布主链路改动必须由 AI（或人类）走完 e2e 真实平台验证**：涉及 `src/main/services/upLoad/`、`publishOutcome.js`、`publishVideo.js`、CLI publish 段的 PR，需本地跑完 `node e2e/run.js -p <平台> --yes` 并在 PR 描述附结果（report.md 的结果分类与诊断行），收敛标准为目标平台 `draftVerified=true` / 退出码 0。工作流见 `.agent/README.md`，完整实战案例见 `.agent/case-2026-10-31-video-draft-e2e.md`
 
 **高价值目标地图**（按 Issue #35 的任务清单，直接定位到代码）：
 
