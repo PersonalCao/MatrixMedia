@@ -24,8 +24,8 @@
             >导出当前记录</el-button
           >
           <span class="toolbar-label">帮助</span>
-          <el-button type="warning" plain @click="openFeedback"
-            >问题反馈</el-button
+          <el-button type="warning" plain @click="openFeatureWall"
+            >问题与新需求</el-button
           >
           <el-button type="warning" plain @click="openQQGroup"
             >加入作者QQ群</el-button
@@ -859,8 +859,11 @@ export default {
       }
       this.loadRecords();
     },
-    openFeedback() {
-      window.open("https://wj.qq.com/s2/26701780/6de3/", "_blank");
+    openFeatureWall() {
+      window.open(
+        "https://hanliang97.github.io/MatrixMedia/feature-wall",
+        "_blank"
+      );
     },
     openQQGroup() {
       window.open(
