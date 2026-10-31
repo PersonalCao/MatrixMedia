@@ -11,23 +11,34 @@ import { capturePublishFailureScreenshot } from "./failureScreenshot.js";
  */
 export const PUBLISH_VERDICT_TIMEOUT_MS = 20000;
 
+/** 存草稿不跳转，只需短暂停顿确认没有报错弹窗；批量存稿不要每个都等满 20 秒 */
+export const DRAFT_VERDICT_WAIT_MS = 3000;
+
 /** 兼容旧调用方（外部按固定等待语义引用过） */
 export const PUBLISH_NAVIGATE_WAIT_MS = PUBLISH_VERDICT_TIMEOUT_MS;
 
 export const PUBLISH_ABNORMAL_MESSAGE =
   "发布异常：20 秒内既未跳转成功页、也没出现成功提示，可能未真正发布，请到平台确认";
 
-/** 各平台发布/存稿成功后的页面提示文案（命中任一即视为成功信号） */
+/**
+ * 各平台发布/存稿成功后的页面提示文案（命中任一即视为成功信号）。
+ *
+ * ⚠ 只收「完整短语」，不要加「已发布 / 保存成功 / 已保存」这类泛化词：
+ * 判据是把整页（含 shadow DOM）所有叶子文本拼起来做 includes，
+ * 而创作后台的静态 UI（左侧导航、标签页、引导文案）里本来就常出现这些词，
+ * 一旦命中会在点击后立刻返回成功 → 实际没发出去也记成功，正好是本 PR 要修的
+ * 那类「假回执」，只是方向反过来。
+ *
+ * 进一步收敛（如需）：给 waitForPublishSignal 传点击前的文本快照做差集，
+ * 但目前 3 个平台的调用点都在点击之后才进 replyPublishOutcome，改造面较大，
+ * 先以「只认完整短语」为准，并用 test-publish-abnormal 锁住静态文案不误判。
+ */
 const SUCCESS_TOAST_TEXTS = [
   "发布成功",
-  "已发布",
   "发表成功",
   "上传成功",
   "投稿成功",
-  "保存成功",
-  "已保存",
   "草稿已保存",
-  "保存到草稿箱",
 ];
 
 /**
@@ -153,8 +164,8 @@ export async function replyPublishOutcome({
   let abnormal = false;
   let signal = "draft_skip";
   if (isDraftMode) {
-    // 存草稿不跳转是平台常态，只记录不判定
-    await delay(page, waitMs);
+    // 存草稿不跳转是平台常态，只记录不判定；用较短的固定等待，避免批量存稿每个卡 20s
+    await delay(page, Math.min(waitMs, DRAFT_VERDICT_WAIT_MS));
     urlAfter = readPageUrl(page);
   } else {
     const verdict = await waitForPublishSignal(page, urlBefore, waitMs);

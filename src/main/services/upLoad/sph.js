@@ -18,6 +18,7 @@ import {
   replyPublishFailure,
   replyPublishOutcome,
 } from "./publishOutcome.js";
+import { head, matchesHead, replaceAllText } from "./textReadback.js";
 
 const SEL_ORIGINAL_CHECKBOX =
   "wujie-app.wujie_iframe >>> .declare-original-checkbox .ant-checkbox-wrapper";
@@ -339,17 +340,29 @@ async function clickSphFormButton(page, selector, label) {
 
   let lastErr = null;
   for (let attempt = 1; attempt <= 8; attempt++) {
-    // 清可能遮挡按钮的遮罩/弹窗（封面弹窗关闭瞬间的残留 mask 是本案主嫌）
+    // 清可能遮挡按钮的遮罩/弹窗（封面弹窗关闭瞬间的残留 mask 是主嫌）。
+    // 视频号整页在 wujie 影子树里，顶层 document 查不到真正的遮罩 —— 必须递归 shadowRoot。
     await page
       .evaluate(() => {
-        [
+        const SELECTORS = [
           ".mask",
           ".common-dialog",
           ".changeAccount-dialog",
           ".weui-desktop-dialog__wrp",
-        ].forEach((sel) => {
-          document.querySelectorAll(sel).forEach((el) => el.remove());
-        });
+        ];
+        const clear = (root) => {
+          try {
+            SELECTORS.forEach((sel) => {
+              root.querySelectorAll(sel).forEach((el) => el.remove());
+            });
+            root.querySelectorAll("*").forEach((el) => {
+              if (el.shadowRoot) clear(el.shadowRoot);
+            });
+          } catch (e) {
+            /* 单层异常不影响其它层 */
+          }
+        };
+        clear(document);
       })
       .catch(() => {});
     await btn
@@ -507,15 +520,28 @@ export default async function (page, data, window, event, onFinish) {
     await titleInput.click();
     if (text.description) {
       await page.keyboard.type(text.description, { delay: 50 });
-      // 回读校验：输入法/焦点丢失会导致静默空写（涡篇 shortTitle 被拒的同类风险）
-      const typedDesc = await titleInput
-        .evaluate((el) => (el.innerText || el.textContent || "").trim())
-        .catch(() => "");
-      const head = String(text.description).trim().slice(0, 8);
-      if (head && !typedDesc.includes(head)) {
-        throw new Error(
-          `描述未写入（期望含「${head}」，实得 ${typedDesc.length} 字）`
+      // 回读校验：输入法/焦点丢失会导致静默空写（涡篇 shortTitle 被拒的同类风险）。
+      // 按码点比较、不一致先重输一次；仍不一致才中止（不把正常发布误杀）。
+      const readDesc = () =>
+        titleInput
+          .evaluate((el) => (el.innerText || el.textContent || "").trim())
+          .catch(() => "");
+      let typedDesc = await readDesc();
+      if (!matchesHead(typedDesc, text.description)) {
+        console.warn(
+          `[sph] 描述回读不一致，重输一次（期望含「${head(
+            text.description
+          )}」，实得 ${typedDesc.length} 字）`
         );
+        await replaceAllText(page, titleInput, text.description, 60);
+        typedDesc = await readDesc();
+        if (!matchesHead(typedDesc, text.description)) {
+          throw new Error(
+            `描述未写入（期望含「${head(text.description)}」，实得 ${
+              typedDesc.length
+            } 字）`
+          );
+        }
       }
     }
     const shortTitle = text.shortTitle;
@@ -528,10 +554,25 @@ export default async function (page, data, window, event, onFinish) {
       await uploadInput2.click();
       let newBt = shortTitle.replace(/[，。、\/,;:!?'"()\[\]{}<>]/g, " ");
       await page.keyboard.type(newBt, { delay: 50 });
-      const stVal = await uploadInput2
-        .evaluate((el) => String(el.value || "").trim())
-        .catch(() => "");
-      if (!stVal) throw new Error("短标题未写入（输入框为空）");
+      const readShort = () =>
+        uploadInput2
+          .evaluate((el) => String(el.value || "").trim())
+          .catch(() => "");
+      let stVal = await readShort();
+      if (!matchesHead(stVal, newBt)) {
+        console.warn(
+          `[sph] 短标题回读不一致，重输一次（期望含「${head(newBt)}」，实得 ${
+            stVal.length
+          } 字）`
+        );
+        await replaceAllText(page, uploadInput2, newBt, 60);
+        stVal = await readShort();
+        if (!matchesHead(stVal, newBt)) {
+          throw new Error(
+            `短标题未写入（期望含「${head(newBt)}」，实得 ${stVal.length} 字）`
+          );
+        }
+      }
     } else {
       console.log("视频号短标题未填写，跳过");
     }

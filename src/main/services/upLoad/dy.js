@@ -15,6 +15,7 @@ import {
   buildPlatformVideoText,
   normalizeVideoTags,
 } from "../../../shared/videoMetadata.js";
+import { head, matchesHead, replaceAllText } from "./textReadback.js";
 
 async function dismissDyGuideModals(page) {
   const closed = await page.evaluate(() => {
@@ -323,13 +324,26 @@ export default async function (page, data, window, event) {
     await input.click({ clickCount: 3 }); // 三击全选
     await page.keyboard.press("Backspace"); // 删除内容
     await page.type(".semi-input", text.title, { delay: 50 });
-    // 回读校验：标题空写不能放过（发布后才补不回来）
-    const typedTitle = await input
-      .evaluate((el) => String(el.value || el.textContent || "").trim())
-      .catch(() => "");
-    const titleHead = String(text.title || "").trim().slice(0, 8);
-    if (titleHead && !typedTitle.includes(titleHead)) {
-      throw new Error(`标题未写入（期望含「${titleHead}」，实得 ${typedTitle.length} 字）`);
+    // 回读校验：标题空写不能放过（发布后才补不回来）。
+    // 按码点取前 8 字比较（slice 会切出孤立代理对）；不一致先重输一次再判失败。
+    const readTitle = () =>
+      input
+        .evaluate((el) => String(el.value || el.textContent || "").trim())
+        .catch(() => "");
+    let typedTitle = await readTitle();
+    if (!matchesHead(typedTitle, text.title)) {
+      console.warn(
+        `[dy] 标题回读不一致，重输一次（期望含「${head(text.title)}」，实得 ${
+          typedTitle.length
+        } 字）`
+      );
+      await replaceAllText(page, input, text.title, 80);
+      typedTitle = await readTitle();
+      if (!matchesHead(typedTitle, text.title)) {
+        throw new Error(
+          `标题未写入（期望含「${head(text.title)}」，实得 ${typedTitle.length} 字）`
+        );
+      }
     }
 
     const input2 = await page.$(".zone-container.editor-kit-container");

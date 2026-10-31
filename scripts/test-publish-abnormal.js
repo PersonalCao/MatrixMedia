@@ -193,6 +193,30 @@ function createEvent() {
     assert.strictEqual(payload.message, "上传成功");
   }
 
+  // 5c. 页面静态文案里出现「已发布/保存成功/已保存」时不能误判成功
+  // （这些词在创作后台左栏/标签页里常驻；全页 includes 会假阳性）
+  {
+    const page = {
+      url: () => "https://x.com/publish",
+      waitForTimeout: async () => {},
+      evaluate: async () => "首页 内容管理 已发布 保存成功 已保存 数据看板",
+    };
+    const event = createEvent();
+    await replyPublishOutcome({
+      page,
+      data: { pt: "视频号", closeWindowAfterPublish: false },
+      window: null,
+      event,
+      urlBefore: "https://x.com/publish",
+      waitMs: 0,
+      successMessage: "上传成功",
+    });
+    const payload = event.calls[0].payload;
+    assert.strictEqual(payload.publishAbnormal, true, "静态泛化文案不得判成功");
+    assert.strictEqual(payload.publishSignal, "none");
+    assert.ok(payload.message.includes("发布异常"));
+  }
+
   // 6. 结果映射：异常不计成功
   {
     const abnormal = resolvePublishCompletion({

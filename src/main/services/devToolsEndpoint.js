@@ -7,9 +7,9 @@ import http from "http";
  * 弱网/大文件下 Runtime.callFunctionOn 很容易被 180s 砍断，
  * 报错原文就是「Increase the 'protocolTimeout' setting」。
  */
-export const DEVTOOLS_PROTOCOL_TIMEOUT_MS = Number(
-  process.env.MM_PROTOCOL_TIMEOUT_MS || 600000
-);
+const envTimeout = Number(process.env.MM_PROTOCOL_TIMEOUT_MS);
+export const DEVTOOLS_PROTOCOL_TIMEOUT_MS =
+  Number.isFinite(envTimeout) && envTimeout > 0 ? envTimeout : 600000;
 
 /**
  * 读取 Electron DevTools 的 /json/version（puppeteer-in-electron 内部同款）。

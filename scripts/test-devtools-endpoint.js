@@ -44,6 +44,28 @@ function portOf(server) {
   // 1. 默认超时是 10 分钟级别（不是 puppeteer 的 180s）
   assert.strictEqual(DEVTOOLS_PROTOCOL_TIMEOUT_MS >= 300000, true);
 
+  // 1b. 环境变量非法（非数字/0/负数）必须回退默认，不能把 NaN 透传给 puppeteer
+  {
+    const { execFileSync } = require("child_process");
+    const probe = path.join(root, "src/main/services/devToolsEndpoint.js");
+    const read = (val) =>
+      Number(
+        execFileSync(
+          process.execPath,
+          [
+            "-e",
+            `const m=require(${JSON.stringify(probe)});console.log(m.DEVTOOLS_PROTOCOL_TIMEOUT_MS)`,
+          ],
+          { env: { ...process.env, MM_PROTOCOL_TIMEOUT_MS: val }, encoding: "utf8" }
+        ).trim()
+      );
+    assert.strictEqual(read("abc"), 600000, "非数字应回退 600000");
+    assert.strictEqual(read(""), 600000, "空串应回退 600000");
+    assert.strictEqual(read("0"), 600000, "0 应回退 600000");
+    assert.strictEqual(read("-5"), 600000, "负数应回退 600000");
+    assert.strictEqual(read("900000"), 900000, "合法值应生效");
+  }
+
   // 2. 正常返回 /json/version
   {
     const payload = {

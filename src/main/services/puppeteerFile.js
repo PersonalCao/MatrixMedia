@@ -6,7 +6,6 @@ import { addExtra } from "puppeteer-extra";
 import pie from "puppeteer-in-electron";
 import path from "path";
 import fs from "fs";
-import http from "http";
 import Type from "./Type";
 import { UPLOAD_WINDOW_AUTO_CLOSE_MS } from "./upLoad/uploadTimeouts.js";
 import { skipCloseConfirmation } from "./upLoad/closeWindow.js";
