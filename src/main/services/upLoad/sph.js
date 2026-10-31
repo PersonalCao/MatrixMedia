@@ -1,6 +1,7 @@
 import path from "path";
 import fs from "fs";
 import maybeClosePublishWindow from "./closeWindow.js";
+import { head, matchesHead, replaceAllText } from "./textReadback.js";
 import { resolveVideoLinkOption } from "../../../shared/videoLink.js";
 import {
   isCreativeStatementNone,
@@ -53,6 +54,15 @@ async function clickSphShadow(
           if (!app || !app.shadowRoot) return false;
           const el = app.shadowRoot.querySelector(sel);
           if (!el) return false;
+          // 按钮 disabled（视频处理/封面裁剪未完成）或不可见时不硬点，等下一轮
+          if (el.disabled || el.getAttribute("aria-disabled") === "true") return false;
+          if (
+            typeof el.checkVisibility === "function" &&
+            !el.checkVisibility()
+          ) {
+            return false;
+          }
+          el.scrollIntoView({ block: "center", inline: "center" });
           el.click();
           if (needFocus && typeof el.focus === "function") el.focus();
           return true;
@@ -477,6 +487,16 @@ export default async function (page, data, window, event, onFinish) {
     });
   } catch (err) {
     console.error("❌ 文件上传失败:", err);
+    // 上传失败必须阻断：文件没进上传区还继续填表点发表，会发出残缺作品（PR #52）
+    await replyPublishFailure({
+      page,
+      data,
+      window,
+      event,
+      message: `视频号视频上传失败: ${(err && err.message) || String(err)}`,
+      closeWindow: true,
+    });
+    return;
   }
 
   try {
@@ -497,7 +517,6 @@ export default async function (page, data, window, event, onFinish) {
         },
         { sel, isValue }
       );
-    const collapse = (s) => String(s || "").replace(/\s+/g, "");
     const clearAndType = async () => {
       // 清掉旧内容再输入：视频号简介为「简介+标签」拼接，助手页若恢复上次草稿，
       // 不清空会把新内容追加成双份。wujie 影子树里 selection API 不可靠，用键盘全选。
@@ -510,7 +529,6 @@ export default async function (page, data, window, event, onFinish) {
     // 简介编辑器：点击聚焦后键盘输入，回读校验未生效则重试
     // （wujie 重渲染会让 ElementHandle/焦点静默失效，键盘输入落空且无报错——e2e 实测）
     const DESC_SEL = ".post-desc-box .input-editor";
-    const expectedDesc = collapse(text.description);
     let descOk = false;
     for (let attempt = 1; attempt <= 3 && !descOk; attempt++) {
       await clickSphShadow(page, DESC_SEL, { timeout: 5000, focus: true });
@@ -519,14 +537,15 @@ export default async function (page, data, window, event, onFinish) {
         await page.keyboard.type(text.description, { delay: 50 });
       }
       await page.waitForTimeout(300);
-      const landed = collapse(await readSphField(DESC_SEL, false));
-      descOk = !expectedDesc || landed.includes(expectedDesc.slice(0, 20));
+      descOk = matchesHead(await readSphField(DESC_SEL, false), text.description);
       if (!descOk && attempt < 3) {
-        console.warn(`[sph] 简介第 ${attempt} 次输入未生效，重试`);
+        console.warn(`[sph] 简介第 ${attempt} 次输入未生效，重输`);
       }
     }
     if (!descOk) {
-      throw new Error("视频号简介输入未生效（回读校验失败）");
+      throw new Error(
+        `描述未写入（期望含「${head(text.description)}」，回读校验失败）`
+      );
     }
 
     const shortTitle = text.shortTitle;
@@ -534,27 +553,37 @@ export default async function (page, data, window, event, onFinish) {
       const sel2 =
         'input[placeholder="填写短标题有机会获得更多流量"]';
       let newBt = shortTitle.replace(/[，。、\/,;:!?'"()\[\]{}<>]/g, " ");
-      const expectedBt = collapse(newBt);
       let btOk = false;
       for (let attempt = 1; attempt <= 3 && !btOk; attempt++) {
         await clickSphShadow(page, sel2, { timeout: 5000, focus: true });
         await clearAndType();
         await page.keyboard.type(newBt, { delay: 50 });
         await page.waitForTimeout(300);
-        const landed = collapse(await readSphField(sel2, true));
-        btOk = expectedBt && landed.includes(expectedBt);
+        btOk = matchesHead(await readSphField(sel2, true), newBt);
         if (!btOk && attempt < 3) {
-          console.warn(`[sph] 短标题第 ${attempt} 次输入未生效，重试`);
+          console.warn(`[sph] 短标题第 ${attempt} 次输入未生效，重输`);
         }
       }
       if (!btOk) {
-        throw new Error("视频号短标题输入未生效（回读校验失败）");
+        throw new Error(
+          `短标题未写入（期望含「${head(newBt)}」，回读校验失败）`
+        );
       }
     } else {
       console.log("视频号短标题未填写，跳过");
     }
   } catch (err) {
     console.error("❌ 输入失败:", err);
+    // 输入失败必须阻断：带空描述存草稿/发布会产出残缺作品（PR #52）
+    await replyPublishFailure({
+      page,
+      data,
+      window,
+      event,
+      message: `视频号描述/短标题填写失败: ${(err && err.message) || String(err)}`,
+      closeWindow: true,
+    });
+    return;
   }
 
   try {

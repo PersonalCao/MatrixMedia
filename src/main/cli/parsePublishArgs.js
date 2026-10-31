@@ -259,9 +259,17 @@ export function parsePublishArgs(subArgv) {
     }
   }
 
+  // 逗号等分隔符不再只告警：直接统一转空格。
+  // 日志里 21 次告警说明调用方一直在传逗号，而哔哩哔哩/小红书按空格切分，
+  // 逗号会被当成标签内的字符，等于把标签写坏。
   if (out.bq && /[,，、;；|]/.test(out.bq)) {
-    console.warn(
-      "MatrixMedia: --tags 推荐用空格分隔多个标签（如 '减脂 健身 教程'）；检测到 ,，、;；| 等分隔符，哔哩哔哩 / 小红书会按空格切分，逗号将作为单个标签字符保留。"
+    const before = String(out.bq);
+    out.bq = before
+      .replace(/[,，、;；|]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    console.log(
+      `MatrixMedia: --tags 中的 ,，、;；| 已统一转为空格（原值: ${before}）`
     );
   }
 

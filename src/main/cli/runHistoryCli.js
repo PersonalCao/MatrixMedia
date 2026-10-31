@@ -35,6 +35,7 @@ const KNOWN_STATUSES = new Set([
   "drafting",
   "abnormal",
   "skipped",
+  "login_required",
 ]);
 
 export function normalizeStatus(item) {
@@ -55,6 +56,7 @@ function statusLabel(s) {
   if (s === "drafting") return "保存草稿中";
   if (s === "abnormal") return "发布异常";
   if (s === "skipped") return "已跳过";
+  if (s === "login_required") return "需重新登录";
   return "发布中";
 }
 
@@ -98,6 +100,9 @@ export function runHistoryCli(options) {
     const sinceTs = options.since ? parseDate(options.since) : -Infinity;
     const untilTs = options.until ? parseDate(options.until) : Infinity;
     targetFiles = allFiles.filter(f => f.ts >= sinceTs && f.ts <= untilTs);
+  } else if (options.all) {
+    // --all：不限天数，把所有日期文件都读进来
+    targetFiles = allFiles;
   } else {
     targetFiles = allFiles.slice(0, options.days);
   }

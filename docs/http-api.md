@@ -161,7 +161,8 @@
 **HTTP 状态码**：
 
 - 参数错误：HTTP `400`
-- 单平台发布失败（如未登录）：HTTP `200`，但 `success: false`、`exitCode: 3`
+- 单平台发布失败（如上传/填写失败）：HTTP `200`，但 `success: false`、`exitCode: 3`
+- 登录态失效：HTTP `200`，`success: false`、`status: login_required`、`exitCode: 5`（需重新扫码后重跑）
 - 视频号链接添加失败但草稿保存成功：HTTP `200`，`success: false`、`status: needs_attention`、`exitCode: 4`
 - 多平台：HTTP 只表示任务是否提交成功，最终结果请查询发布记录
 - 服务已配置 CORS，浏览器或本机脚本均可调用

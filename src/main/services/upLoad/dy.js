@@ -15,6 +15,7 @@ import {
   buildPlatformVideoText,
   normalizeVideoTags,
 } from "../../../shared/videoMetadata.js";
+import { head, matchesHead, replaceAllText } from "./textReadback.js";
 
 async function dismissDyGuideModals(page) {
   const closed = await page.evaluate(() => {
@@ -300,7 +301,17 @@ export default async function (page, data, window, event) {
     const uploadFileHandle = uploadInputs[uploadInputs.length - 1];
     await uploadFileHandle.uploadFile(path.resolve(data.filePath));
   } catch (e) {
+    // 上传失败必须阻断：文件没进上传区还继续填表点发布，会发出残缺作品
     console.error("❌ 输入文件失败", e);
+    await replyPublishFailure({
+      page,
+      data,
+      window,
+      event,
+      message: `抖音视频上传失败: ${(e && e.message) || String(e)}`,
+      closeWindow: true,
+    });
+    return;
   }
   try {
     const text = buildPlatformVideoText("抖音", data.data);
@@ -313,6 +324,27 @@ export default async function (page, data, window, event) {
     await input.click({ clickCount: 3 }); // 三击全选
     await page.keyboard.press("Backspace"); // 删除内容
     await page.type(".semi-input", text.title, { delay: 50 });
+    // 回读校验：标题空写不能放过（发布后才补不回来）。
+    // 按码点取前 8 字比较（slice 会切出孤立代理对）；不一致先重输一次再判失败。
+    const readTitle = () =>
+      input
+        .evaluate((el) => String(el.value || el.textContent || "").trim())
+        .catch(() => "");
+    let typedTitle = await readTitle();
+    if (!matchesHead(typedTitle, text.title)) {
+      console.warn(
+        `[dy] 标题回读不一致，重输一次（期望含「${head(text.title)}」，实得 ${
+          typedTitle.length
+        } 字）`
+      );
+      await replaceAllText(page, input, text.title, 80);
+      typedTitle = await readTitle();
+      if (!matchesHead(typedTitle, text.title)) {
+        throw new Error(
+          `标题未写入（期望含「${head(text.title)}」，实得 ${typedTitle.length} 字）`
+        );
+      }
+    }
 
     const input2 = await page.$(".zone-container.editor-kit-container");
     await input2.click(); // 定位光标
@@ -338,6 +370,15 @@ export default async function (page, data, window, event) {
     }
   } catch (e) {
     console.error("❌ 输入标题失败", e);
+    await replyPublishFailure({
+      page,
+      data,
+      window,
+      event,
+      message: `抖音标题/简介填写失败: ${(e && e.message) || String(e)}`,
+      closeWindow: true,
+    });
+    return;
   }
 
   try {
@@ -422,7 +463,12 @@ export default async function (page, data, window, event) {
 
     const urlBefore = readPageUrl(page);
     await clickDyPublish(page, isDraftMode);
-    console.log(isDraftMode ? "✅ 抖音视频已保存草稿" : "✅ 抖音视频上传成功");
+    // 抖音网页端没有草稿箱：点击成功 ≠ 草稿已留底，回执必须如实标注（P1-4）
+    console.log(
+      isDraftMode
+        ? "✅ 抖音已点击存草稿（网页端无草稿箱，未能核验）"
+        : "✅ 抖音视频上传成功"
+    );
     await replyPublishOutcome({
       page,
       data,
@@ -430,7 +476,10 @@ export default async function (page, data, window, event) {
       event,
       urlBefore,
       isDraftMode,
-      successMessage: isDraftMode ? "保存草稿成功" : "上传成功",
+      successMessage: isDraftMode
+        ? "已点击存草稿（抖音网页端无草稿箱，无法核验）"
+        : "上传成功",
+      extraPayload: isDraftMode ? { draftUnverified: true } : {},
     });
   } catch (e) {
     const detail = (e && e.message) || String(e);

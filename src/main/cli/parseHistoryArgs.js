@@ -33,9 +33,13 @@ const STATUS_ALIASES = {
   skipped: "skipped",
   跳过: "skipped",
   已跳过: "skipped",
+  login_required: "login_required",
+  需重新登录: "login_required",
+  登录失效: "login_required",
 };
 
-const STATUS_LIST = "success|failed|publishing|scheduled|expired|draft|drafting|abnormal|skipped";
+const STATUS_LIST =
+  "success|failed|publishing|scheduled|expired|draft|drafting|abnormal|skipped|login_required";
 
 /** 带值选项的值不能缺失，也不能是下一个选项（以 - 开头） */
 function readValue(args, i, flag) {
@@ -70,6 +74,7 @@ export function parseHistoryArgs(subArgv) {
     limit: 50,
     since: null,
     until: null,
+    all: false,
     json: false,
   };
 
@@ -110,10 +115,16 @@ export function parseHistoryArgs(subArgv) {
       if (!v.ok) return v;
       out.until = v.value;
       i = v.next;
+    } else if (a === "--all") {
+      // 读全部历史（不限天数）。--days 默认 7，脚本里想拉全量时用它
+      out.all = true;
     } else if (a === "--json") {
       out.json = true;
     } else {
-      return { ok: false, error: `未知参数: ${a}` };
+      return {
+        ok: false,
+        error: `未知参数: ${a}（可用: -p/--platform、--phone、-s/--status、-d/--days、-n/--limit、--since、--until、--all、--json）`,
+      };
     }
   }
 
@@ -156,10 +167,11 @@ export function historyHelpText() {
   -p, --platform <id>   仅列某个平台：dy|抖音、tt|头条、ks|快手、blbl|哔哩哔哩、bjh|百家号、sph|视频号、xhs|小红书、fqsp|番茄视频
       --phone <id>      仅列某个手机号
   -s, --status <s>      仅列某个状态：success|failed|publishing|scheduled|expired|
-                          draft|drafting|abnormal|skipped
+                          draft|drafting|abnormal|skipped|login_required
                           （中文同义：成功|失败|发布中|等待定时发布|任务过期|
-                          已保存草稿|保存草稿中|发布异常|已跳过）
+                          已保存草稿|保存草稿中|发布异常|已跳过|需重新登录）
   -d, --days <n>        读取最近 N 天，默认 7；与 --since/--until 冲突时以 since/until 为准
+      --all             读取全部历史（不限天数，等价于把所有日期文件都读进来）
       --since <date>    起始日期（含），YYYY-MM-DD
       --until <date>    结束日期（含），YYYY-MM-DD
   -n, --limit <n>       最多输出条数，默认 50（按时间倒序）

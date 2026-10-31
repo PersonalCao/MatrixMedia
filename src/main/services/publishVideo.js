@@ -7,6 +7,7 @@ import ptConfig from "../config/ptConfig";
 import { runPuppeteerTask } from "./puppeteerFile";
 import { changeData } from "../server/utils";
 import { createScheduledRecord } from "./scheduledPublish";
+import { findExistingScheduled } from "./scheduledDedupe.js";
 import { CLI_PUBLISH_TIMEOUT_MS } from "./upLoad/uploadTimeouts.js";
 import {
   isRemotePublishFile,
@@ -16,6 +17,28 @@ import {
 import { resolveAccountPublishMode } from "./accountPublishSettingsResolver.js";
 import { resolvePublishCompletion } from "../../shared/publishResult.js";
 import { normalizeVideoMetadata } from "../../shared/videoMetadata.js";
+
+/** 读取全部 pushData 记录（跨日期平铺），用于定时任务查重 */
+function listPushDataRecords() {
+  try {
+    const res = changeData({
+      fileName: "pushData",
+      type: "get",
+      item: { page: 1, pageSize: 10000 },
+    });
+    const data = (res && res.data) || {};
+    const rows = [];
+    Object.keys(data).forEach((date) => {
+      (data[date] || []).forEach((it) => {
+        if (it) rows.push({ ...it, date: it.date || date });
+      });
+    });
+    return rows;
+  } catch (e) {
+    console.warn("读取 pushData 失败，跳过定时任务查重:", e && e.message);
+    return [];
+  }
+}
 
 function fileStemFromSource(source) {
   const raw = String(source || "").trim();
@@ -232,6 +255,23 @@ async function runSingleFilePublishInner(
       };
     }
     try {
+      // 查重：同一视频在同一时刻只允许一条待触发任务，
+      // 否则重跑 --publish-at 会造出两条到期记录 → 触发时双发。
+      const existing = findExistingScheduled(listPushDataRecords(), scheduledRecord);
+      if (existing) {
+        console.log(
+          `[publish] 定时任务已存在（id=${existing.id}），跳过重复创建: ${scheduledRecord.scheduledPublishAtText}`
+        );
+        return {
+          exitCode: 0,
+          status: "scheduled",
+          scheduled: true,
+          duplicate: true,
+          id: existing.id || null,
+          publishAt: scheduledRecord.scheduledPublishAtText,
+          message: "同一视频在该时间点的定时任务已存在，未重复创建",
+        };
+      }
       const addRes = changeData({
         fileName: "pushData",
         type: "add",
@@ -304,7 +344,11 @@ async function runSingleFilePublishInner(
           publishStatus: status,
           publishSuccessCount:
             status === "success" || status === "draft" ? 1 : 0,
-          publishFailCount: status === "failed" ? 1 : 0,
+          // login_required 也是「本次没发出去」，必须计失败次数：
+          // 否则 history/GUI 的失败判定（failCount>0 且 successCount=0）认不出来，
+          // 记录会永远停在「发布中」。
+          publishFailCount:
+            status === "failed" || status === "login_required" ? 1 : 0,
           publishAbnormalCount: status === "abnormal" ? 1 : 0,
           lastPublishMessage: message || "",
           lastPublishAt: Date.now(),
@@ -378,8 +422,15 @@ async function runSingleFilePublishInner(
           }
           const message = (payload && payload.message) || "登录态异常或未登录";
           console.error("登录态异常或未登录:", JSON.stringify(payload));
-          updateRecord("failed", message);
-          finish({ exitCode: 3, status: "failed", message, id: recordId });
+          // 登录失效不是内容失败：单独状态 + 退出码 5，便于流水线提示"先补登录"
+          updateRecord("login_required", message);
+          finish({
+            exitCode: 5,
+            status: "login_required",
+            message,
+            id: recordId,
+            loginRequired: true,
+          });
         }
       },
     };

@@ -7,6 +7,56 @@ export const PUBLISH_NAVIGATE_WAIT_MS = 5000;
 export const PUBLISH_ABNORMAL_MESSAGE =
   "发布异常：点击发布后 5 秒页面地址未变化，可能未真正发布，请到平台确认";
 
+/** 发布模式判定窗口：固定 5 秒对慢平台（转码/审核排队）会把已发布误判成异常（PR #52） */
+export const PUBLISH_VERDICT_TIMEOUT_MS = 20000;
+
+/**
+ * 各平台发布成功后的页面提示文案（命中任一即视为成功信号）。
+ *
+ * ⚠ 只收「完整短语」，不要加「已发布 / 保存成功 / 已保存」这类泛化词：
+ * 判据是把整页（含 shadow DOM）所有文本拼起来做 includes，
+ * 创作后台的静态 UI（左侧导航、标签页、引导文案）里本来就常出现这些词，
+ * 一旦命中会在点击后立刻返回假成功（PR #52 锁定的反向假回执）。
+ */
+const SUCCESS_TOAST_TEXTS = [
+  "发布成功",
+  "发表成功",
+  "上传成功",
+  "投稿成功",
+  "草稿已保存",
+];
+
+/**
+ * 发布模式轮询等待成功信号：URL 跳转或平台成功提示，任一命中立即返回。
+ * @returns {Promise<{ok: boolean, signal: string, urlAfter: string}>}
+ */
+async function waitForPublishSignal(page, urlBefore, timeoutMs) {
+  // 按轮次而不是墙钟计时：每轮含 1 秒等待，真实环境等价于 timeoutMs；
+  // 单测里 waitForTimeout 是空实现，也不会空转 20 秒。
+  const maxRounds = Math.max(2, Math.ceil(timeoutMs / 1000));
+  let urlAfter = readPageUrl(page);
+  for (let round = 0; round < maxRounds; round++) {
+    urlAfter = readPageUrl(page);
+    if (
+      urlBefore &&
+      urlAfter &&
+      normalizeUrl(urlAfter) !== normalizeUrl(urlBefore)
+    ) {
+      return { ok: true, signal: "url_changed", urlAfter };
+    }
+    const text = await readPageText(page);
+    if (text) {
+      for (const kw of SUCCESS_TOAST_TEXTS) {
+        if (text.includes(kw)) {
+          return { ok: true, signal: `toast:${kw}`, urlAfter };
+        }
+      }
+    }
+    await delay(page, 1000);
+  }
+  return { ok: false, signal: "none", urlAfter: readPageUrl(page) };
+}
+
 /** 存草稿结果的轮询间隔：toast 存活一般 ≥2 秒，400ms 足够捕捉 */
 export const DRAFT_VERIFY_POLL_INTERVAL_MS = 400;
 
@@ -345,20 +395,27 @@ export async function replyPublishOutcome({
     return;
   }
 
-  await delay(page, waitMs);
-
-  const urlAfter = readPageUrl(page);
-  // 读不到地址（窗口已关/页面销毁）时不做异常判定，避免误报
-  const urlUnchanged =
-    !!urlBefore && !!urlAfter && normalizeUrl(urlAfter) === normalizeUrl(urlBefore);
-  // 草稿模式已在上方提前返回，这里只剩发布模式：地址未变化视为异常
-  const abnormal = urlUnchanged;
+  // 发布模式判定窗口用 20 秒信号轮询；waitMs 仅约束草稿模式（存稿 5 秒足够）
+  const verdict = await waitForPublishSignal(page, urlBefore, PUBLISH_VERDICT_TIMEOUT_MS);
+  const urlAfter = verdict.urlAfter;
+  // 读不到地址（窗口已关/页面销毁）时 abnormal 为 false，不误报异常
+  const abnormal = !verdict.ok && !!verdict.urlAfter;
+  console.log(
+    `[publish] ${data.pt || ""} 发布判定 signal=${verdict.signal} ${
+      abnormal
+        ? "→ 异常"
+        : verdict.ok
+          ? "→ 成功"
+          : "→ 无法判定（页面已销毁/读不到地址）"
+    }`
+  );
 
   const payload = {
     ...data,
     ...extraPayload,
     status: true,
     publishPageUrl: urlAfter,
+    publishSignal: verdict.signal,
     message: abnormal ? PUBLISH_ABNORMAL_MESSAGE : successMessage,
   };
   if (abnormal) {
