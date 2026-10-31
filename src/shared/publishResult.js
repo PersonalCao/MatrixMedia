@@ -8,7 +8,10 @@ export function resolvePublishCompletion(payload) {
   const fallbackDraft = Boolean(
     ok &&
       payload.needsAttention === true &&
-      payload.outcome === "draft_saved"
+      // draft_saved：视频号链接添加失败等已确认存草稿但需人工跟进的场景；
+      // draft_unverified：存草稿后页面无成功/失败信号，无法确认是否保存成功（#42）
+      (payload.outcome === "draft_saved" ||
+        payload.outcome === "draft_unverified")
   );
   // 发布成功后平台会自动跳成功页；5 秒后地址未变化时主进程标记 publishAbnormal，
   // 这里统一降级为「发布异常」，避免当成成功。

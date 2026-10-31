@@ -7,6 +7,56 @@ export const PUBLISH_NAVIGATE_WAIT_MS = 5000;
 export const PUBLISH_ABNORMAL_MESSAGE =
   "发布异常：点击发布后 5 秒页面地址未变化，可能未真正发布，请到平台确认";
 
+/** 存草稿结果的轮询间隔：toast 存活一般 ≥2 秒，400ms 足够捕捉 */
+export const DRAFT_VERIFY_POLL_INTERVAL_MS = 400;
+
+/**
+ * 存草稿成功的页面文案：出现即确认草稿已保存（#42）。
+ * 覆盖各平台通用 toast 文案；后续用真实账号逐平台校准后，
+ * 可按 data.pt 在 pollDraftVerdict 里追加平台专属信号。
+ */
+const DRAFT_SUCCESS_PATTERNS = [
+  /保存成功/,
+  /已保存到草稿/,
+  /已保存至草稿/,
+  /已存为草稿/,
+  /已存入草稿/,
+  /存草稿成功/,
+  /草稿已保存/,
+  /稿件已保存/,
+  /作品已保存/,
+];
+
+/**
+ * 存草稿失败的强信号：出现即抛错走各平台 catch 的失败上报
+ * （status:false，队列 transport 由此触发重试），退出码 3。
+ * 只收「明确表示本次保存没成」的文案，避免误判导致重复上传。
+ */
+const DRAFT_FAILURE_PATTERNS = [
+  /保存失败/,
+  /发布失败/,
+  /提交失败/,
+  /上传失败/,
+  /网络(?:异常|错误|请求失败|开小差|不给力)/,
+  /(?:服务器|系统|服务)(?:异常|错误|繁忙|开小差)/,
+  /登录(?:已)?(?:过期|失效)|账号未登录|请先登录|重新登录|登录信息失效/,
+  /操作(?:过于)?频繁|请求过多|稍(?:候|后)再(?:试|来)/,
+  /内容(?:包含)?(?:敏感|违规)|审核未通过/,
+];
+
+/**
+ * 存草稿失败的可疑信号（表单校验提示等）：可能来自常驻的输入辅助文案，
+ * 单独出现时不判失败，只作为「未确认」时的 evidence 提示人工核对。
+ */
+const DRAFT_VALIDATION_PATTERNS = [
+  /请(?:先)?(?:填写|输入|选择|上传|勾选|设置|完善)/,
+  /(?:不能|不可)为空|必填/,
+  /字数(?:已)?超出|超出.{0,6}限制|内容过长/,
+];
+
+/** 点击存草稿后页面跳到登录页 → 登录态失效，判失败 */
+const LOGIN_URL_PATTERN = /passport|\/login(?:[?/.]|$)|\bsso\b|signin|sign-in/i;
+
 /** 安全读取当前页面地址，页面已销毁时返回空串 */
 export function readPageUrl(page) {
   try {
@@ -32,13 +82,112 @@ function delay(page, ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/** 读取页面正文文本，用于匹配保存成功/失败提示；页面跳转中或已销毁时返回空串 */
+async function readPageText(page) {
+  if (!page || typeof page.evaluate !== "function") return "";
+  try {
+    return String(
+      (await page.evaluate(() => {
+        try {
+          const b = document.body;
+          if (!b) return "";
+          return String(b.innerText || b.textContent || "");
+        } catch (_) {
+          return "";
+        }
+      })) || ""
+    );
+  } catch (_) {
+    // 执行上下文随页面跳转被销毁属正常，下一轮轮询再试
+    return "";
+  }
+}
+
+/** 返回第一个命中的文案；无命中返回空串 */
+function matchPattern(patterns, text) {
+  if (!text) return "";
+  for (const p of patterns) {
+    const m = text.match(p);
+    if (m) return m[0];
+  }
+  return "";
+}
+
+/**
+ * 点击「存草稿」后轮询页面信号，判定保存结果。
+ *
+ * #42：草稿模式不跳转，此前只要点击不抛错就一律 status:true，
+ * 后台无草稿也回报成功。这里在回执前给出独立判据：
+ * - verified   页面出现保存成功提示，或地址跳转（管理页/成功页）
+ * - failed     页面出现明确失败文案，或跳转到登录页
+ * - unverified 两者皆无：无法确认，由上层标记 needs_attention（退出码 4，不触发重试）
+ *
+ * @param {import("puppeteer-core").Page} page
+ * @param {object} options
+ * @param {string} [options.urlBefore] 点击存草稿前的页面地址
+ * @param {number} [options.waitMs] 轮询窗口总时长
+ * @returns {Promise<{outcome: "verified"|"failed"|"unverified", evidence: string}>}
+ */
+export async function pollDraftVerdict(
+  page,
+  { urlBefore, waitMs = PUBLISH_NAVIGATE_WAIT_MS } = {}
+) {
+  const deadline = Date.now() + Math.max(waitMs, 0);
+  let validationHint = "";
+  do {
+    const urlAfter = readPageUrl(page);
+    if (
+      urlBefore &&
+      urlAfter &&
+      LOGIN_URL_PATTERN.test(urlAfter) &&
+      !LOGIN_URL_PATTERN.test(urlBefore)
+    ) {
+      return {
+        outcome: "failed",
+        evidence: "页面跳转到了登录页，登录态可能已失效",
+      };
+    }
+    const text = await readPageText(page);
+    const failed = matchPattern(DRAFT_FAILURE_PATTERNS, text);
+    if (failed) {
+      return { outcome: "failed", evidence: `页面提示「${failed}」` };
+    }
+    const saved = matchPattern(DRAFT_SUCCESS_PATTERNS, text);
+    if (saved) {
+      return { outcome: "verified", evidence: `页面提示「${saved}」` };
+    }
+    if (!validationHint) {
+      const validation = matchPattern(DRAFT_VALIDATION_PATTERNS, text);
+      if (validation) validationHint = `页面出现校验提示「${validation}」`;
+    }
+    if (
+      urlBefore &&
+      urlAfter &&
+      normalizeUrl(urlAfter) !== normalizeUrl(urlBefore)
+    ) {
+      return { outcome: "verified", evidence: `页面已跳转：${urlAfter}` };
+    }
+    if (Date.now() < deadline) {
+      await delay(page, DRAFT_VERIFY_POLL_INTERVAL_MS);
+    }
+  } while (Date.now() < deadline);
+  return {
+    outcome: "unverified",
+    evidence: validationHint || "页面未出现保存成功提示，地址也未变化",
+  };
+}
+
 /**
  * 点击发布/存草稿后统一回执：
- * 等待 5 秒，若为发布模式且页面地址没有变化（未跳成功页），
+ * 发布模式等待 5 秒，若页面地址没有变化（未跳成功页），
  * 视为「发布异常」上报，避免把疑似失败记成成功。
  *
- * 注意：这里始终以 status: true 上报，异常通过 publishAbnormal 标记，
+ * 注意：发布模式始终以 status: true 上报，异常通过 publishAbnormal 标记，
  * 因为 status: false 会触发上层的自动重试，导致重复发布。
+ *
+ * 草稿模式（#42）：回执前轮询页面信号校验保存结果——
+ * 明确失败文案/跳登录页时抛错走各平台 catch 的失败上报（status:false，重试）；
+ * 确认成功时正常回执；两者皆无时标记 needs_attention（退出码 4，不重试）。
  *
  * @param {object} options
  * @param {import("puppeteer-core").Page} options.page
@@ -46,7 +195,7 @@ function delay(page, ms) {
  * @param {import("electron").BrowserWindow} options.window
  * @param {{ reply: Function }} options.event
  * @param {string} options.urlBefore 点击发布前的页面地址
- * @param {boolean} [options.isDraftMode] 存草稿不跳转，跳过地址校验
+ * @param {boolean} [options.isDraftMode] 存草稿模式，回执前做保存结果校验
  * @param {string} [options.successMessage]
  * @param {object} [options.extraPayload] 额外回执字段（如 publishMode）
  * @param {object} [options.closeWindowData] 覆盖关窗判断用的数据
@@ -64,13 +213,85 @@ export async function replyPublishOutcome({
   closeWindowData,
   waitMs = PUBLISH_NAVIGATE_WAIT_MS,
 }) {
+  // 草稿模式：先轮询页面信号校验保存结果，再决定回执（#42）。
+  // 此前只要点击不抛错就一律 status:true，后台无草稿也回报成功。
+  if (isDraftMode) {
+    const verdict = await pollDraftVerdict(page, { urlBefore, waitMs });
+
+    // 明确失败：抛错走各平台 catch 的失败上报（截图 + status:false，
+    // 队列 transport 由此触发重试），CLI 退出码 3
+    if (verdict.outcome === "failed") {
+      console.warn(
+        `[publish] ${data.pt || ""} 保存草稿失败：${verdict.evidence}`
+      );
+      throw new Error(`保存草稿失败：${verdict.evidence}`);
+    }
+
+    const urlAfter = readPageUrl(page);
+    const urlUnchanged =
+      !!urlBefore &&
+      !!urlAfter &&
+      normalizeUrl(urlAfter) === normalizeUrl(urlBefore);
+    const verified = verdict.outcome === "verified";
+    const payload = {
+      ...data,
+      ...extraPayload,
+      status: true,
+      publishPageUrl: urlAfter,
+      message: verified
+        ? successMessage
+        : `未能确认草稿是否保存成功，请到平台草稿箱核对${
+            verdict.evidence ? `（${verdict.evidence}）` : ""
+          }`,
+    };
+    // 草稿模式不跳转，地址未变化属正常，不能据此判异常（发布模式的判定见上）。
+    // 但仍把「点击存草稿后地址是否变化」记录下来并打日志，便于排查
+    // 「回报成功但后台没有草稿」时区分是点了没反应，还是存到了别处。
+    if (urlBefore && urlAfter) {
+      payload.draftUrlUnchanged = urlUnchanged;
+      console.log(
+        `[publish] ${data.pt || ""} 存草稿后页面地址${
+          urlUnchanged ? "未变化" : "已变化"
+        }（草稿模式仅记录，不判定异常）：${urlAfter}`
+      );
+    }
+    if (verified) {
+      payload.draftVerified = true;
+      console.log(
+        `[publish] ${data.pt || ""} 已确认草稿保存成功（${verdict.evidence}）`
+      );
+    } else {
+      // 无成功也无失败信号：不再无条件报成功，标记待人工核对。
+      // needsAttention + outcome 由 resolvePublishCompletion 映射为
+      // needs_attention（退出码 4），不触发重试，避免重复上传。
+      payload.draftVerified = false;
+      payload.needsAttention = true;
+      payload.outcome = "draft_unverified";
+      // 保留当前页面画面作为证据，便于人工核对（截图失败不影响回执）
+      const shot = await capturePublishFailureScreenshot(page, data, {
+        window,
+      });
+      if (shot) payload.failScreenshot = shot;
+      console.warn(`[publish] ${data.pt || ""} ${payload.message}`);
+    }
+
+    try {
+      event.reply("puppeteerFile-done", payload);
+    } catch (e) {
+      console.error("发布回执发送失败:", e && e.message ? e.message : e);
+    }
+    maybeClosePublishWindow(closeWindowData || data, window);
+    return;
+  }
+
   await delay(page, waitMs);
 
   const urlAfter = readPageUrl(page);
   // 读不到地址（窗口已关/页面销毁）时不做异常判定，避免误报
   const urlUnchanged =
     !!urlBefore && !!urlAfter && normalizeUrl(urlAfter) === normalizeUrl(urlBefore);
-  const abnormal = !isDraftMode && urlUnchanged;
+  // 草稿模式已在上方提前返回，这里只剩发布模式：地址未变化视为异常
+  const abnormal = urlUnchanged;
 
   const payload = {
     ...data,
@@ -79,17 +300,6 @@ export async function replyPublishOutcome({
     publishPageUrl: urlAfter,
     message: abnormal ? PUBLISH_ABNORMAL_MESSAGE : successMessage,
   };
-  // 草稿模式不跳转，地址未变化属正常，不能据此判异常（发布模式的判定见下）。
-  // 但仍把「点击存草稿后地址是否变化」记录下来并打日志，便于排查
-  // 「回报成功但后台没有草稿」时区分是点了没反应，还是存到了别处。
-  if (isDraftMode && urlBefore && urlAfter) {
-    payload.draftUrlUnchanged = urlUnchanged;
-    console.log(
-      `[publish] ${data.pt || ""} 存草稿后页面地址${
-        urlUnchanged ? "未变化" : "已变化"
-      }（草稿模式仅记录，不判定异常）：${urlAfter}`
-    );
-  }
   if (abnormal) {
     payload.publishAbnormal = true;
     payload.outcome = "publish_abnormal";

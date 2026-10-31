@@ -367,6 +367,10 @@ async function runSingleFilePublishInner(
             publishMode: completion.savedAsDraft ? "draft" : "publish",
             outcome: payload && payload.outcome,
             needsAttention: completion.fallbackDraft,
+            // 草稿保存结果校验字段（#42），供 CLI JSON 透传给 e2e/脚本消费；
+            // undefined 时 JSON.stringify 自动省略，保持老版本输出兼容
+            draftVerified: payload && payload.draftVerified,
+            draftUrlUnchanged: payload && payload.draftUrlUnchanged,
           });
         } else if (channel === "puppeteer-noLogin") {
           if (payload && payload.taskId != null && payload.taskId !== taskId) {

@@ -655,6 +655,13 @@ export async function runCliMain(argv = process.argv) {
           status: true,
           resultStatus: result.status,
           publishMode: result.publishMode,
+          // 草稿模式的保存结果校验字段（#42），老版本 App 无这两个字段
+          ...(result.draftVerified !== undefined
+            ? { draftVerified: result.draftVerified }
+            : {}),
+          ...(result.draftUrlUnchanged !== undefined
+            ? { draftUrlUnchanged: result.draftUrlUnchanged }
+            : {}),
           message: result.message,
         })
       );
@@ -667,6 +674,10 @@ export async function runCliMain(argv = process.argv) {
           publishMode: result.publishMode,
           outcome: result.outcome,
           needsAttention: true,
+          // 草稿未确认场景透传诊断字段，便于 e2e/脚本消费（#42）
+          ...(result.draftUrlUnchanged !== undefined
+            ? { draftUrlUnchanged: result.draftUrlUnchanged }
+            : {}),
           message: result.message,
         })
       );

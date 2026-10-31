@@ -576,12 +576,13 @@ export default async function (page, data, window, event) {
     });
   } catch (e) {
     // 失败瞬间截图留证（登录过期 / 风控弹窗 / 元素改版都能一眼看出）
+    const detail = (e && e.message) || String(e);
     await replyPublishFailure({
       page,
       data,
       window,
       event,
-      message: "上传失败",
+      message: detail.length > 200 ? `${detail.slice(0, 200)}…` : detail,
     });
     console.error("❌ 发布失败", e);
   }
