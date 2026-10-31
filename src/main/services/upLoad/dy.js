@@ -315,7 +315,19 @@ export default async function (page, data, window, event) {
     await page.type(".semi-input", text.title, { delay: 50 });
 
     const input2 = await page.$(".zone-container.editor-kit-container");
-    await input2.click(); // 三击全选
+    await input2.click(); // 定位光标
+    // 必须清掉旧内容：抖音创作页同分区会恢复上次编辑的简介，
+    // 不清空的话新简介（含 #标签）会追加在旧内容后面 → 内容和标签成双。
+    await input2
+      .evaluate((el) => {
+        el.focus();
+        const sel = window.getSelection();
+        if (sel && sel.selectAllChildren) {
+          sel.selectAllChildren(el);
+          if (document.execCommand) document.execCommand("delete");
+        }
+      })
+      .catch(() => {});
     if (text.description) {
       await page.keyboard.type(text.description, { delay: 50 });
     }

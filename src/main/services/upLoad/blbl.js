@@ -222,6 +222,17 @@ export default async function (page, data, window, event) {
     await page.waitForSelector(selector, { timeout: WAIT_SELECTOR_APPEAR_MS });
     const input = await page.$(selector);
     await input.click();
+    // 清掉旧内容再输入：B 站投稿页同分区可能恢复上次简介，不清空会追加成双份
+    await input
+      .evaluate((el) => {
+        el.focus();
+        const sel = window.getSelection();
+        if (sel && sel.selectAllChildren) {
+          sel.selectAllChildren(el);
+          if (document.execCommand) document.execCommand("delete");
+        }
+      })
+      .catch(() => {});
     if (text.description) {
       await page.keyboard.type(text.description);
     }

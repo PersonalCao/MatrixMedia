@@ -398,6 +398,17 @@ export default async function (page, data, window, event, onFinish) {
     );
     // 传统input/textarea的操作
     await titleInput.click();
+    // 清掉旧内容再输入：视频号简介为「简介+标签」拼接，助手页若恢复上次草稿，
+    // 不清空会把新内容追加成双份。wujie 影子树里 selection API 不可靠，用键盘全选。
+    try {
+      const isMac = process.platform === "darwin";
+      await page.keyboard.down(isMac ? "Meta" : "Control");
+      await page.keyboard.press("a");
+      await page.keyboard.up(isMac ? "Meta" : "Control");
+      await page.keyboard.press("Backspace");
+    } catch (_) {
+      /* 清空失败不阻断，保持旧行为 */
+    }
     if (text.description) {
       await page.keyboard.type(text.description, { delay: 50 });
     }
