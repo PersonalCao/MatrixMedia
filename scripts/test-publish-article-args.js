@@ -47,11 +47,11 @@ assert.strictEqual(ok([...base, "--content", "正文"]).partition, "persist:1380
 assert.strictEqual(ok(["-p", "juejin", "--phone", "  13800138000  ", "-t", "标题", "--content", "正文"]).partition, "persist:13800138000掘金");
 assert.strictEqual(ok(["-p", "juejin", "--partition", "  persist:13800138000掘金  ", "-t", "标题", "--content", "正文"]).partition, "persist:13800138000掘金");
 assert.strictEqual(ok([...base, "--content", "正文"]).category, "前端");
-assert.strictEqual(ok([...base, "--content", "正文"]).tags, "前端 electron");
+assert.strictEqual(ok([...base, "--content", "正文"]).tags, "前端 Electron");
 assert.strictEqual(ok([...base, "--content", "正文", "--category", ""]).category, "前端");
 assert.strictEqual(ok([...base, "--content", "正文", "--category", "   "]).category, "前端");
-assert.strictEqual(ok([...base, "--content", "正文", "--tags", ""]).tags, "前端 electron");
-assert.strictEqual(ok([...base, "--content", "正文", "--tags", "   "]).tags, "前端 electron");
+assert.strictEqual(ok([...base, "--content", "正文", "--tags", ""]).tags, "前端 Electron");
+assert.strictEqual(ok([...base, "--content", "正文", "--tags", "   "]).tags, "前端 Electron");
 assert.strictEqual(ok([...base, "--file", "./a.md"]).file, "./a.md");
 assert.strictEqual(ok([...base, "--content", "正文", "--publish-at", "2026-05-13 10:00:00"]).publishAt, "2026-05-13 10:00:00");
 
