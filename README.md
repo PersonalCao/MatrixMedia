@@ -140,6 +140,14 @@ _Cursor / Cline_（`.cursor/mcp.json` 或全局 MCP 配置，格式相同）：
 
 **DeepSeek Harness（DSH）**：[`dsh-plugin/`](./dsh-plugin) 目录是现成的 DSH 插件（范式同 [dsh-plugin-kuaizi-atom](https://github.com/hanliang97/dsh-plugin-kuaizi-atom)），在 DSH Web UI → 插件 → 添加插件 → Git 仓库中填入插件仓库地址即可一键接入上述 MCP 工具，详见 [dsh-plugin/README.md](./dsh-plugin/README.md)。
 
+### AI 自动 e2e 开发模式（v0.14.0）
+
+[`.agent/`](./.agent) 是 AI 编程智能体在本仓库的工作入口：`skills/` 可复用技能 + **「AI 自动 e2e 开发模式」工作流引导**。发布主链路的 AI 开发必须走完整闭环：
+
+> 改代码 → 单测 → **e2e 真实平台验证**（`node e2e/run.js -p <平台> --yes`，自动构建本地产物免打包）→ 读证据（诊断行 / 截图 / 回执 JSON）→ 修正 → 重跑 → 直至 `draftVerified=true`
+
+红线：不允许无条件回报成功；误判失败会触发重试导致重复上传；证据不足时诚实标注「待人工核对」。工作流详见 [.agent/README.md](./.agent/README.md)，完整迭代实录（10 轮 e2e、每轮现象/证据/动作）见 [.agent/case-2026-10-31-video-draft-e2e.md](./.agent/case-2026-10-31-video-draft-e2e.md)。
+
 ## 目前可以一键发布视频的平台有
 
 1. 抖音
