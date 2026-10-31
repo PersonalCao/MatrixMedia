@@ -166,6 +166,10 @@ async function askBackendCheck(platformName, manageUrl, marker) {
 /** 根据回执与退出码分类（详见 README 的结果分类表） */
 function classify({ r, receipt, hasVerifyLogic }) {
   if (r.timedOut) return "TIMEOUT";
+  // CLI 对 skip 回执只透传 resultStatus: "skipped"，没有 skipped 字段
+  if (receipt && (receipt.skipped || receipt.resultStatus === "skipped")) {
+    return "SKIPPED_USER_CLOSE";
+  }
   if (r.code === 0 && receipt) {
     if (receipt.draftVerified === true) return "PASS_VERIFIED";
     if (!hasVerifyLogic) return "LEGACY_SUCCESS";

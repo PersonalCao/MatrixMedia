@@ -17,7 +17,13 @@ const CASES = {
     creativeStatement: "ai_generated",
   },
   blbl: { name: "哔哩哔哩", tags: "原创音乐,AI音乐" },
-  sph: { name: "视频号", tags: "原创音乐" },
+  sph: {
+    name: "视频号",
+    tags: "原创音乐",
+    // 视频号勾选「声明原创」后平台要求必须选择视频标注，否则存草稿被「请先选择」拦下；
+    // self_shot 会进一步弹「添加拍摄时间和地点」对话框，故 e2e 用 ai_generated
+    creativeStatement: "ai_generated",
+  },
   xhs: { name: "小红书", tags: "原创音乐,AI音乐" },
   ks: { name: "快手", tags: "原创音乐" },
   bjh: { name: "百家号", tags: "原创音乐" },

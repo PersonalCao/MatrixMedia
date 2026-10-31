@@ -82,16 +82,40 @@ function delay(page, ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-/** 读取页面正文文本，用于匹配保存成功/失败提示；页面跳转中或已销毁时返回空串 */
-async function readPageText(page) {
+/** 读取页面正文文本（含开放 shadow root 与同源 iframe），用于匹配保存成功/失败提示；
+ *  页面跳转中或已销毁时返回空串。视频号等内容渲染在 wujie 影子树里，
+ *  body.innerText 拿不到，必须递归收集 shadowRoot.textContent；
+ *  wujie 的部分 UI（如 toast）渲染在其内部 iframe 里，需一并遍历 */
+export async function readPageText(page) {
   if (!page || typeof page.evaluate !== "function") return "";
   try {
     return String(
       (await page.evaluate(() => {
         try {
-          const b = document.body;
-          if (!b) return "";
-          return String(b.innerText || b.textContent || "");
+          const acc = [];
+          const visit = (root) => {
+            try {
+              const t = String(root.textContent || "");
+              if (t) acc.push(t);
+            } catch (_) {
+              /* 单个 root 读取失败不阻断 */
+            }
+            const els = root.querySelectorAll ? root.querySelectorAll("*") : [];
+            for (const el of els) {
+              if (el.shadowRoot) visit(el.shadowRoot);
+              // 同源 iframe（wujie 内部容器）：跨域时访问 contentDocument 会抛错，静默跳过
+              if (el.tagName === "IFRAME") {
+                try {
+                  const doc = el.contentDocument;
+                  if (doc && doc.body) visit(doc.body);
+                } catch (_) {
+                  /* 跨域 iframe */
+                }
+              }
+            }
+          };
+          if (document.body) visit(document.body);
+          return acc.join("\n");
         } catch (_) {
           return "";
         }
@@ -108,6 +132,21 @@ function matchPattern(patterns, text) {
   if (!text) return "";
   for (const p of patterns) {
     const m = text.match(p);
+    if (m) return m[0];
+  }
+  return "";
+}
+
+/** 命中文案在页面文本中的上下文（前后各取一段），用于定位提示指向的字段 */
+function matchPatternWithContext(patterns, text, pad = 30) {
+  if (!text) return "";
+  for (const p of patterns) {
+    const m = text.match(p);
+    if (m && m.index != null) {
+      const start = Math.max(0, m.index - pad);
+      const end = Math.min(text.length, m.index + m[0].length + pad);
+      return text.slice(start, end).replace(/\s+/g, " ").trim();
+    }
     if (m) return m[0];
   }
   return "";
@@ -134,6 +173,7 @@ export async function pollDraftVerdict(
 ) {
   const deadline = Date.now() + Math.max(waitMs, 0);
   let validationHint = "";
+  let lastText = "";
   do {
     const urlAfter = readPageUrl(page);
     if (
@@ -148,6 +188,7 @@ export async function pollDraftVerdict(
       };
     }
     const text = await readPageText(page);
+    lastText = text;
     const failed = matchPattern(DRAFT_FAILURE_PATTERNS, text);
     if (failed) {
       return { outcome: "failed", evidence: `页面提示「${failed}」` };
@@ -157,8 +198,8 @@ export async function pollDraftVerdict(
       return { outcome: "verified", evidence: `页面提示「${saved}」` };
     }
     if (!validationHint) {
-      const validation = matchPattern(DRAFT_VALIDATION_PATTERNS, text);
-      if (validation) validationHint = `页面出现校验提示「${validation}」`;
+      const validation = matchPatternWithContext(DRAFT_VALIDATION_PATTERNS, text);
+      if (validation) validationHint = `页面出现校验提示：…${validation}…`;
     }
     if (
       urlBefore &&
@@ -171,6 +212,15 @@ export async function pollDraftVerdict(
       await delay(page, DRAFT_VERIFY_POLL_INTERVAL_MS);
     }
   } while (Date.now() < deadline);
+  // 未确认时的校准线索：把页面里与保存相关的文本片段打到主进程日志
+  const saveRelated = String(lastText || "").match(
+    /.{0,40}(?:保存|草稿|成功|失败).{0,40}/g
+  );
+  console.log(
+    `[publish] 草稿校验窗口结束时页面保存相关文本: ${
+      saveRelated ? saveRelated.slice(-6).join(" ┃ ") : "（无）"
+    }`
+  );
   return {
     outcome: "unverified",
     evidence: validationHint || "页面未出现保存成功提示，地址也未变化",
@@ -198,6 +248,9 @@ export async function pollDraftVerdict(
  * @param {boolean} [options.isDraftMode] 存草稿模式，回执前做保存结果校验
  * @param {string} [options.successMessage]
  * @param {object} [options.extraPayload] 额外回执字段（如 publishMode）
+ * @param {{outcome: "verified"|"unverified", evidence: string}} [options.draftVerdictOverride]
+ *   草稿模式调用方自带的判定（如视频号已跳草稿列表核对）：提供时跳过页面信号轮询，
+ *   避免调用方自身的页面跳转被误读成「保存成功后跳转」的假证据
  * @param {object} [options.closeWindowData] 覆盖关窗判断用的数据
  * @param {number} [options.waitMs]
  */
@@ -210,13 +263,21 @@ export async function replyPublishOutcome({
   isDraftMode = false,
   successMessage = "上传成功",
   extraPayload = {},
+  draftVerdictOverride,
   closeWindowData,
   waitMs = PUBLISH_NAVIGATE_WAIT_MS,
 }) {
   // 草稿模式：先轮询页面信号校验保存结果，再决定回执（#42）。
   // 此前只要点击不抛错就一律 status:true，后台无草稿也回报成功。
   if (isDraftMode) {
-    const verdict = await pollDraftVerdict(page, { urlBefore, waitMs });
+    // 调用方自带判定（如视频号已跳草稿列表核对）优先，避免其自身跳转污染 URL 证据；
+    // 其次沿用「extraPayload.draftVerified === true 即已确认」的约定；否则轮询页面信号
+    const preVerified = extraPayload && extraPayload.draftVerified === true;
+    const verdict =
+      draftVerdictOverride ||
+      (preVerified
+        ? { outcome: "verified", evidence: "调用方已通过草稿列表核对到新增草稿" }
+        : await pollDraftVerdict(page, { urlBefore, waitMs }));
 
     // 明确失败：抛错走各平台 catch 的失败上报（截图 + status:false，
     // 队列 transport 由此触发重试），CLI 退出码 3

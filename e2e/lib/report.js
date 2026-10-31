@@ -18,6 +18,7 @@ const RESULT_LABELS = {
   ERROR: "❌ 执行异常",
   SKIPPED_NO_LOGIN: "⏭️ 跳过（该平台无已登录账号）",
   SKIPPED_DRYRUN: "⏭️ dry-run（仅打印命令）",
+  SKIPPED_USER_CLOSE: "⏭️ 跳过（发布窗口被关闭）",
 };
 
 /** 需要人工跟进的结果集合 */
