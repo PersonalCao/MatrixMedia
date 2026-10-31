@@ -120,6 +120,7 @@ node scripts/test-<name>.js
 3. 改打包逻辑 → 跑 `yarn test:pick-release-installer`
 4. 跨子命令改动 → 至少手动 `node . cli <subcommand> --help` 验证参数解析没坏
 5. 改某平台发布逻辑（`upLoad/<pt>.js`）→ 跑对应 `yarn test:<pt>-*`（如有），并在 PR 中说明无法自动验证的部分
+6. **改发布主链路（`upLoad/`、`publishOutcome.js`、`publishVideo.js`、`cli/index.js` 的 publish 段）→ 单测通过后必须跑发布 e2e**：`node e2e/run.js -p <受影响平台> --yes`（详见 `e2e/README.md`）。e2e 默认**本地开发模式**：产物缺失/源码更新时自动 `yarn build:dir` 后以 `electron . cli …` 执行，免 electron-builder 打包；正式发版前用 `node e2e/run.js --app-mode installed` 对打包产物复验一次。结果非 0 或出现 `NEEDS_ATTENTION` / `LEGACY_SUCCESS` 时，按 `e2e/artifacts/<runId>/report.md` 的诊断行与截图修正后重跑。发布回执字段 / 退出码语义变化时必须同步更新 `e2e/` 的分类逻辑并在 PR 中说明。人交互验证用 `node e2e/run.js`（不加 `--yes`），会在每平台后提示人工到后台核对草稿是否真实存在
 
 ## 安全 / 合规
 

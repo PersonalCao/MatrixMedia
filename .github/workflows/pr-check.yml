@@ -1,0 +1,45 @@
+name: PR Check
+
+on:
+  pull_request:
+    branches:
+      - main
+      - prod
+
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20.15.1"
+      - name: Install dependencies
+        run: yarn
+      # 部分被测模块引用 telemetrySecret.generated.js（gitignore 的本地生成物）
+      - name: Generate telemetry secret
+        run: node scripts/gen-telemetry-secret.js
+      - name: Run unit tests
+        run: |
+          set -e
+          # 发布回执 / 退出码语义（含 #42 草稿校验）
+          yarn test:publish-abnormal
+          yarn test:publish-failure-queue
+          yarn test:publish-draft-args
+          yarn test:publish-article-args
+          # 登记与历史
+          yarn test:pushdata-dedupe
+          yarn test:history-status
+          yarn test:history-args
+          yarn test:publish-history-csv
+          # 平台适配逻辑
+          yarn test:ks-description
+          yarn test:sph-video-product
+          yarn test:sph-video-drama
+          yarn test:sph-video-series
+          yarn test:sph-entity-options
+          # 截图与取消
+          yarn test:fail-screenshot
+          yarn test:fail-screenshot-timeout
+          yarn test:puppeteer-cancel
