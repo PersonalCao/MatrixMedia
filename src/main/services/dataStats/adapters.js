@@ -16,6 +16,10 @@
  */
 
 const DAY_MS = 86400000;
+// 注：粉丝趋势裁剪逻辑以**字面量**内联在下面视频号的 collectScript 里（见
+// "clamp-begin/end" 标记）。不要改成 `${fn.toString()}` 注入——打包器会最小化
+// 函数名（toString 出来叫 function t(...)），页面里却按 clampFansHistory 调用，
+// 运行期报 "clampFansHistory is not defined"。fansHistory.js 只作参考实现与单测。
 
 /** 页面内 fetch 公共封装（每个脚本开头注入） */
 const FETCH_HELPER = `
@@ -130,7 +134,7 @@ const ADAPTERS = {
     });
   }
   // 2) 视频列表（游标分页 rawKeyBuff ← lastBuff）
-  let rawKeyBuff = "", guard = 0;
+  let rawKeyBuff = "", guard = 0, paginationComplete = false;
   let plays = 0, likes = 0, comments = 0, shares = 0, favorites = 0;
   while (guard++ < 50) {
     const r = await __post("/micro/content/cgi-bin/mmfinderassistant-bin/post/post_list", {
@@ -160,10 +164,32 @@ const ADAPTERS = {
       plays += w.play; likes += w.like; comments += w.comment; shares += w.share; favorites += w.favorite;
       out.works.push(w);
     }
-    if (!data.continueFlag || !data.lastBuff) break;
+    if (!data.continueFlag || !data.lastBuff) { paginationComplete = true; break; }
     rawKeyBuff = data.lastBuff;
     await __sleep(800);
   }
+  // clamp-begin 粉丝趋势裁剪：平台会回填账号创建前的填充点（实测 364 天恒为 1），
+  // 只保留最早作品发布日（+8 时区）之后的点；没有作品时只留最近 7 天。
+  // 前提：作品列表必须拉全（paginationComplete）。若被 guard 上限截断，
+  // min(publishTime) 只是「最后一页」的发布时间，会把真历史误裁掉——
+  // 宁可放过假历史，也不要误裁真历史。
+  if (paginationComplete && out.fansHistory.length) {
+    var __minTs = Infinity;
+    for (var __wi = 0; __wi < out.works.length; __wi++) {
+      var __pt = Number(out.works[__wi] && out.works[__wi].publishTime);
+      if (isFinite(__pt) && __pt > 0 && __pt < __minTs) __minTs = __pt;
+    }
+    var __cutMs = isFinite(__minTs) ? __minTs : Date.now() - 6 * 86400000;
+    var __cutDate = new Date(__cutMs + 8 * 3600 * 1000).toISOString().slice(0, 10);
+    out.fansHistory = out.fansHistory.filter(function (x) {
+      return x && x.date && String(x.date) >= __cutDate;
+    });
+  } else if (!paginationComplete) {
+    console.warn(
+      "[dataStats] 视频号作品分页被上限截断（>500 条），跳过粉丝趋势裁剪，避免误裁真实历史"
+    );
+  }
+  // clamp-end
   Object.assign(out.overview, { plays, likes, comments, shares, favorites });
   return out;
 })()
