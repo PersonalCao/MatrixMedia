@@ -443,6 +443,8 @@ export default {
         return "danger";
       if (status === "scheduled" || status === "skipped") return "info";
       if (status === "draft") return "info";
+      // 登录失效要人工扫码才能恢复，用 danger 让它在列表里显眼（文案见 publishStatusText）
+      if (status === "login_required") return "danger";
       return "warning";
     },
     publishStatusText(status) {
@@ -454,12 +456,13 @@ export default {
       if (status === "expired") return "任务过期";
       if (status === "draft") return "已保存草稿";
       if (status === "drafting") return "保存草稿中";
+      if (status === "login_required") return "需重新登录";
       return "发布中";
     },
     isPublishFailed(row) {
       if (!row) return false;
       if (
-        ["fail", "failed", "expired", "abnormal"].includes(
+        ["fail", "failed", "expired", "abnormal", "login_required"].includes(
           String(row.publishStatus || "")
         )
       )

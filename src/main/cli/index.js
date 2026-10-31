@@ -616,6 +616,21 @@ export async function runCliMain(argv = process.argv) {
           message: result.message,
         })
       );
+    } else if (result.exitCode === 5) {
+      // 登录态失效：单独的退出码，直接给出重登指令（不要落进通用 else 只剩一句文案）
+      console.error(result.message || "登录态已失效，需要重新登录后再试");
+      const aliasMap = {
+        抖音: "dy",
+        快手: "ks",
+        视频号: "sph",
+        哔哩哔哩: "blbl",
+        百家号: "bjh",
+        小红书: "xhs",
+      };
+      const alias = aliasMap[v.platform] || "<平台>";
+      console.error(
+        `提示: 先执行 cli login -p ${alias} --phone ${v.phone || "<手机号>"} 在本机完成扫码，再重跑本次发布。`
+      );
     } else if (result.exitCode === 3) {
       console.error(result.message || "登录态异常或未登录");
       if (v.platform === "抖音") {

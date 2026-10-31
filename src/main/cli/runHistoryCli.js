@@ -35,6 +35,7 @@ const KNOWN_STATUSES = new Set([
   "drafting",
   "abnormal",
   "skipped",
+  "login_required",
 ]);
 
 export function normalizeStatus(item) {
@@ -55,6 +56,7 @@ function statusLabel(s) {
   if (s === "drafting") return "保存草稿中";
   if (s === "abnormal") return "发布异常";
   if (s === "skipped") return "已跳过";
+  if (s === "login_required") return "需重新登录";
   return "发布中";
 }
 

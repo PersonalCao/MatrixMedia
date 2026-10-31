@@ -344,7 +344,11 @@ async function runSingleFilePublishInner(
           publishStatus: status,
           publishSuccessCount:
             status === "success" || status === "draft" ? 1 : 0,
-          publishFailCount: status === "failed" ? 1 : 0,
+          // login_required 也是「本次没发出去」，必须计失败次数：
+          // 否则 history/GUI 的失败判定（failCount>0 且 successCount=0）认不出来，
+          // 记录会永远停在「发布中」。
+          publishFailCount:
+            status === "failed" || status === "login_required" ? 1 : 0,
           publishAbnormalCount: status === "abnormal" ? 1 : 0,
           lastPublishMessage: message || "",
           lastPublishAt: Date.now(),
