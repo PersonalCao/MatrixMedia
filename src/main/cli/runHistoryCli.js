@@ -98,6 +98,9 @@ export function runHistoryCli(options) {
     const sinceTs = options.since ? parseDate(options.since) : -Infinity;
     const untilTs = options.until ? parseDate(options.until) : Infinity;
     targetFiles = allFiles.filter(f => f.ts >= sinceTs && f.ts <= untilTs);
+  } else if (options.all) {
+    // --all：不限天数，把所有日期文件都读进来
+    targetFiles = allFiles;
   } else {
     targetFiles = allFiles.slice(0, options.days);
   }

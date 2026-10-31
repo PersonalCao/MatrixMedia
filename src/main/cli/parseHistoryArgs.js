@@ -70,6 +70,7 @@ export function parseHistoryArgs(subArgv) {
     limit: 50,
     since: null,
     until: null,
+    all: false,
     json: false,
   };
 
@@ -110,10 +111,16 @@ export function parseHistoryArgs(subArgv) {
       if (!v.ok) return v;
       out.until = v.value;
       i = v.next;
+    } else if (a === "--all") {
+      // 读全部历史（不限天数）。--days 默认 7，脚本里想拉全量时用它
+      out.all = true;
     } else if (a === "--json") {
       out.json = true;
     } else {
-      return { ok: false, error: `未知参数: ${a}` };
+      return {
+        ok: false,
+        error: `未知参数: ${a}（可用: -p/--platform、--phone、-s/--status、-d/--days、-n/--limit、--since、--until、--all、--json）`,
+      };
     }
   }
 
@@ -160,6 +167,7 @@ export function historyHelpText() {
                           （中文同义：成功|失败|发布中|等待定时发布|任务过期|
                           已保存草稿|保存草稿中|发布异常|已跳过）
   -d, --days <n>        读取最近 N 天，默认 7；与 --since/--until 冲突时以 since/until 为准
+      --all             读取全部历史（不限天数，等价于把所有日期文件都读进来）
       --since <date>    起始日期（含），YYYY-MM-DD
       --until <date>    结束日期（含），YYYY-MM-DD
   -n, --limit <n>       最多输出条数，默认 50（按时间倒序）
