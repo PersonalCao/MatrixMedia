@@ -134,7 +134,7 @@ const ADAPTERS = {
     });
   }
   // 2) 视频列表（游标分页 rawKeyBuff ← lastBuff）
-  let rawKeyBuff = "", guard = 0;
+  let rawKeyBuff = "", guard = 0, paginationComplete = false;
   let plays = 0, likes = 0, comments = 0, shares = 0, favorites = 0;
   while (guard++ < 50) {
     const r = await __post("/micro/content/cgi-bin/mmfinderassistant-bin/post/post_list", {
@@ -164,13 +164,16 @@ const ADAPTERS = {
       plays += w.play; likes += w.like; comments += w.comment; shares += w.share; favorites += w.favorite;
       out.works.push(w);
     }
-    if (!data.continueFlag || !data.lastBuff) break;
+    if (!data.continueFlag || !data.lastBuff) { paginationComplete = true; break; }
     rawKeyBuff = data.lastBuff;
     await __sleep(800);
   }
   // clamp-begin 粉丝趋势裁剪：平台会回填账号创建前的填充点（实测 364 天恒为 1），
   // 只保留最早作品发布日（+8 时区）之后的点；没有作品时只留最近 7 天。
-  if (out.fansHistory.length) {
+  // 前提：作品列表必须拉全（paginationComplete）。若被 guard 上限截断，
+  // min(publishTime) 只是「最后一页」的发布时间，会把真历史误裁掉——
+  // 宁可放过假历史，也不要误裁真历史。
+  if (paginationComplete && out.fansHistory.length) {
     var __minTs = Infinity;
     for (var __wi = 0; __wi < out.works.length; __wi++) {
       var __pt = Number(out.works[__wi] && out.works[__wi].publishTime);
@@ -181,6 +184,10 @@ const ADAPTERS = {
     out.fansHistory = out.fansHistory.filter(function (x) {
       return x && x.date && String(x.date) >= __cutDate;
     });
+  } else if (!paginationComplete) {
+    console.warn(
+      "[dataStats] 视频号作品分页被上限截断（>500 条），跳过粉丝趋势裁剪，避免误裁真实历史"
+    );
   }
   // clamp-end
   Object.assign(out.overview, { plays, likes, comments, shares, favorites });

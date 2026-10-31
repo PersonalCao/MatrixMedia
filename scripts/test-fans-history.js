@@ -116,10 +116,11 @@ function series(startDate, days, value = 1) {
   const block = src.match(/\/\/ clamp-begin[\s\S]*?\/\/ clamp-end/);
   assert.ok(block, "应能切出内联块");
 
-  const runInline = (history, works, now) => {
+  const runInline = (history, works, now, complete = true) => {
     const body = `
       const out = { fansHistory: history, works: works };
       const __now = now;
+      const paginationComplete = ${complete ? "true" : "false"};
       ${block[0].replace(/Date\.now\(\)/g, "__now")}
       return out.fansHistory;
     `;
@@ -138,6 +139,21 @@ function series(startDate, days, value = 1) {
     const inline = runInline(JSON.parse(JSON.stringify(f.hist)), f.works, f.now).map((x) => x.date);
     const ref = clampFansHistory(f.hist, f.works, f.now).map((x) => x.date);
     assert.deepStrictEqual(inline, ref, `内联块与参考实现不一致: ${JSON.stringify(f.works)}`);
+  }
+
+  // 9b. 分页被 guard 上限截断（>500 条）时不得裁剪：
+  //     此时 min(publishTime) 只是最后一页的时间，会把真历史误裁
+  {
+    assert.ok(src.includes("paginationComplete = true"), "自然结束必须打完整标记");
+    const hist = series("2025-10-21", 365);
+    const worksTail = [{ publishTime: Date.parse("2026-10-01T00:00:00Z") }];
+    const now = Date.parse("2026-10-31T00:00:00Z");
+
+    const keptWhenTruncated = runInline(JSON.parse(JSON.stringify(hist)), worksTail, now, false);
+    assert.strictEqual(keptWhenTruncated.length, hist.length, "截断时必须原样保留历史");
+
+    const keptWhenComplete = runInline(JSON.parse(JSON.stringify(hist)), worksTail, now, true);
+    assert.ok(keptWhenComplete.length < hist.length, "完整分页下才允许裁剪（对照组）");
   }
 }
 
