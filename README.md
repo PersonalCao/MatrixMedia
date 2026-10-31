@@ -138,6 +138,8 @@ _Cursor / Cline_（`.cursor/mcp.json` 或全局 MCP 配置，格式相同）：
 
 > **登录说明**：所有平台均需在 GUI 中完成登录后再通过 MCP 发布。MCP 运行在无头 stdio 环境，无法弹出扫码窗口。
 
+**DeepSeek Harness（DSH）**：[`dsh-plugin/`](./dsh-plugin) 目录是现成的 DSH 插件（范式同 [dsh-plugin-kuaizi-atom](https://github.com/hanliang97/dsh-plugin-kuaizi-atom)），在 DSH Web UI → 插件 → 添加插件 → Git 仓库中填入插件仓库地址即可一键接入上述 MCP 工具，详见 [dsh-plugin/README.md](./dsh-plugin/README.md)。
+
 ## 目前可以一键发布视频的平台有
 
 1. 抖音
