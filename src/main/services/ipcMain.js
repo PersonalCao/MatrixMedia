@@ -805,6 +805,13 @@ export default {
               tags: cleanCell(
                 map["标签"] != null ? map["标签"] : map["tags"] || ""
               ),
+              coverPath: cleanCell(
+                map["封面"] != null
+                  ? map["封面"]
+                  : map["cover"] != null
+                  ? map["cover"]
+                  : map["coverpath"] || ""
+              ),
             };
           })
           .filter((r) => r.fileName);
@@ -881,13 +888,14 @@ export default {
       try {
         const workbook = xlsx.utils.book_new();
         const wsData = [
-          ["文件名", "标题", "简介", "标签", "视频号短标题"],
+          ["文件名", "标题", "简介", "标签", "视频号短标题", "封面"],
           [
             "第01集.mp4",
             "精彩短剧第一集",
             "第一集剧情简介",
             "短剧,影视,追剧",
             "短剧第一集精彩看点",
+            "",
           ],
           [
             "第02集.mp4",
@@ -895,6 +903,7 @@ export default {
             "第二集剧情简介",
             "短剧,影视,追剧",
             "短剧第二集精彩看点",
+            "",
           ],
         ];
         const ws = xlsx.utils.aoa_to_sheet(wsData);

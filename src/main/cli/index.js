@@ -113,6 +113,13 @@ function parseXlsxRows(xlsxPath) {
             : ""
         ),
         tags: cleanCell(map["标签"] != null ? map["标签"] : map["tags"] || ""),
+        coverPath: cleanCell(
+          map["封面"] != null
+            ? map["封面"]
+            : map["cover"] != null
+            ? map["cover"]
+            : map["coverpath"] || ""
+        ),
         creativeStatement: cleanCell(
           map["创作声明"] != null
             ? map["创作声明"]
@@ -253,6 +260,51 @@ async function runBatchDirPublish(v, cfg) {
     const bt1 = row.title && row.title.trim() ? row.title.trim() : stem;
     const bookName = stem;
 
+    // 封面：显式 --cover 全局覆盖 xlsx 封面列；行内相对路径相对视频目录解析。
+    // 校验失败按「文件不存在」同一策略跳过该行，不中断整批。
+    const rawCover = String(v.cover || row.coverPath || "").trim();
+    let coverPath = "";
+    if (rawCover) {
+      const absCover = path.isAbsolute(rawCover)
+        ? rawCover
+        : path.join(resolvedDir, rawCover);
+      const coverOk =
+        fs.existsSync(absCover) && fs.statSync(absCover).isFile();
+      const extOk =
+        v.platform !== "视频号" || /\.(jpe?g|png)$/i.test(absCover);
+      if (!coverOk) {
+        const r = {
+          index: i + 1,
+          total: rows.length,
+          fileName: row.fileName,
+          title: row.title,
+          platform: v.platform,
+          phone: v.phone || "",
+          status: "skipped",
+          message: "封面文件不存在: " + absCover,
+        };
+        results.push(r);
+        console.log(JSON.stringify({ progress: true, ...r }));
+        continue;
+      }
+      if (!extOk) {
+        const r = {
+          index: i + 1,
+          total: rows.length,
+          fileName: row.fileName,
+          title: row.title,
+          platform: v.platform,
+          phone: v.phone || "",
+          status: "skipped",
+          message: "视频号封面仅支持 jpg/png 格式: " + absCover,
+        };
+        results.push(r);
+        console.log(JSON.stringify({ progress: true, ...r }));
+        continue;
+      }
+      coverPath = absCover;
+    }
+
     // Format tags: split by comma (xlsx format), then # prefix for hashtag platforms
     const rawTags = String(row.tags || "").trim();
     let bq = "";
@@ -300,6 +352,7 @@ async function runBatchDirPublish(v, cfg) {
         tags: metadata.tags,
         ...metadata.legacy,
         creativeStatement: cs,
+        coverPath,
       },
       url: cfg.upload,
       show: false,
@@ -328,6 +381,7 @@ async function runBatchDirPublish(v, cfg) {
       shortTitle: metadata.shortTitle,
       tags: metadata.tags,
       ...metadata.legacy,
+      coverPath,
       filePath: resolvedFile,
       useragent: cfg.useragent,
       phone: derivePhoneForRecord(v),

@@ -84,6 +84,28 @@
             字，且不能包含特殊标点符号。
           </p>
         </el-form-item>
+        <el-form-item label="封面图片">
+          <div class="cover-field-row">
+            <el-button size="small" @click="chooseCoverImage">{{
+              form.coverPath ? "重新选择封面" : "选择封面图片"
+            }}</el-button>
+            <el-button
+              v-if="form.coverPath"
+              type="text"
+              size="small"
+              class="cover-clear"
+              @click="form.coverPath = ''"
+              >清除</el-button
+            >
+            <span v-if="form.coverPath" class="cover-name" :title="form.coverPath">{{
+              coverFileName
+            }}</span>
+          </div>
+          <p class="bt2-tip">
+            选填。设置后抖音 / 快手 / 视频号会使用自定义封面（竖图 3:4
+            最佳；视频号仅支持 jpg/png），不选则由平台自动截取视频帧。
+          </p>
+        </el-form-item>
         <el-form-item label="定时发布">
           <el-switch
             v-model="scheduledPublish"
@@ -482,6 +504,10 @@
           >已加载 {{ dirXlsxRows.length }} 条记录</span
         >
       </div>
+      <p class="bt2-tip" style="margin-bottom: 12px">
+        声明文件支持列：文件名 / 标题 / 简介 / 标签 / 视频号短标题 / 封面（选填，填图片路径，绝对路径或相对视频目录均可；视频号仅支持
+        jpg/png，路径无效会阻断发布）。
+      </p>
 
       <el-table
         v-if="dirXlsxRows.length"
@@ -518,6 +544,12 @@
           prop="shortTitle"
           label="视频号短标题"
           min-width="140"
+          show-overflow-tooltip
+        />
+        <el-table-column
+          prop="coverPath"
+          label="封面"
+          min-width="120"
           show-overflow-tooltip
         />
         <el-table-column label="文件状态" width="80">
@@ -682,6 +714,8 @@ export default {
         bt1: "",
         description: "",
         shortTitle: "",
+        // 自定义封面图片绝对路径（发布第一步选图；重发时从历史记录带入）
+        coverPath: "",
       },
       thisShow: false,
       closeWindow: true,
@@ -689,7 +723,6 @@ export default {
       publishAt: "",
       republishContext: null,
       republishTextOtherName: "",
-      republishCoverPath: "",
       showLoginDialog: false,
       loginData: {},
       treeData: [],
@@ -701,7 +734,7 @@ export default {
       // Directory batch publish state
       dirPublishVisible: false,
       dirPath: "",
-      dirXlsxRows: [], // [{fileName, title, description, tags, shortTitle}]
+      dirXlsxRows: [], // [{fileName, title, description, tags, shortTitle, coverPath}]
       dirXlsxError: "",
       dirBatchFiles: [],
       publishing: false,
@@ -710,6 +743,9 @@ export default {
   computed: {
     displayFileName() {
       return fileBaseName(this.localFilePath);
+    },
+    coverFileName() {
+      return this.form.coverPath ? fileBaseName(this.form.coverPath) : "";
     },
     batchStatementOptions() {
       return CREATIVE_STATEMENT_OPTIONS;
@@ -868,6 +904,34 @@ export default {
       this._pushBqTags(tokens);
       this._clearBqInput();
     },
+    async chooseCoverImage() {
+      const picked = await ipcRenderer.invoke("dialog:openImageFile");
+      if (picked) this.form.coverPath = picked;
+    },
+    /**
+     * 封面文件发布前校验（GUI 直发不经 runSingleFilePublish 的 resolveCoverPath，
+     * 不在这里拦就会到上传阶段才失败，视频白传一次）：
+     * 文件必须存在；勾选视频号时仅收 jpg/png（上传控件 accept 限制）。
+     * @returns {string} 错误消息，空串表示通过
+     */
+    validateCoverPath(coverPath, platformNames = []) {
+      const p = String(coverPath || "").trim();
+      if (!p) return "";
+      let stat = null;
+      try {
+        stat = require("fs").statSync(p);
+      } catch (_) {
+        return `封面文件不存在: ${p}`;
+      }
+      if (!stat.isFile()) return `封面路径不是文件: ${p}`;
+      const needSph = (platformNames || []).some((pt) =>
+        String(pt || "").includes("视频号")
+      );
+      if (needSph && !/\.(jpe?g|png)$/i.test(p)) {
+        return `视频号封面仅支持 jpg/png 格式: ${p}`;
+      }
+      return "";
+    },
     open(filePath) {
       if (!filePath) return;
       this.localFilePath = filePath;
@@ -881,6 +945,7 @@ export default {
         bt1: "",
         description: "",
         shortTitle: "",
+        coverPath: "",
       };
       this.thisShow = false;
       this.closeWindow = true;
@@ -888,7 +953,6 @@ export default {
       this.publishAt = "";
       this.republishContext = null;
       this.republishTextOtherName = "";
-      this.republishCoverPath = "";
       this.metaVisible = true;
     },
     openRepublish(payload = {}) {
@@ -905,6 +969,7 @@ export default {
         bt1: (form.bt1 || "").trim(),
         description: (form.description || form.bdText || "").trim(),
         shortTitle: (form.shortTitle || form.bt2Filled || "").trim(),
+        coverPath: (form.coverPath || "").trim(),
       };
       this.bqTags = parseBqToTags(form.tags || form.bq);
       this.resetPlatformStatementState();
@@ -914,7 +979,6 @@ export default {
       this.scheduledPublish = false;
       this.publishAt = "";
       this.republishTextOtherName = payload.textOtherName || fileStem(filePath);
-      this.republishCoverPath = form.coverPath || "";
       this.republishContext = {
         records: Array.isArray(payload.records) ? payload.records : [],
         failedTargets: Array.isArray(payload.failedTargets)
@@ -1001,7 +1065,7 @@ export default {
           tags: metadata.tags,
           ...metadata.legacy,
           bq: formatBqFromTags(this.bqTags),
-          coverPath: this.republishCoverPath || "",
+          coverPath: (this.form.coverPath || "").trim(),
         },
       };
     },
@@ -1580,6 +1644,7 @@ export default {
         bt1: "",
         description: "",
         shortTitle: "",
+        coverPath: "",
       };
       this.thisShow = false;
       this.closeWindow = true;
@@ -1587,7 +1652,6 @@ export default {
       this.publishAt = "";
       this.republishContext = null;
       this.republishTextOtherName = "";
-      this.republishCoverPath = "";
       this.dirBatchFiles = [];
       this.attrsVisible = false;
     },
@@ -1775,6 +1839,14 @@ export default {
           return;
         }
       }
+      const coverError = this.validateCoverPath(
+        this.form.coverPath,
+        platforms.map((p) => p.pt)
+      );
+      if (coverError) {
+        this.$message.error(coverError);
+        return;
+      }
       const baseVideo = this.buildVideoPayload();
       const selectedFile = fileBaseName(this.localFilePath);
       const currentDate = moment().format("YYYY-MM-DD");
@@ -1824,6 +1896,7 @@ export default {
                 bq: video.data.bq,
                 creativeStatement: video.data.creativeStatement,
                 publishOptions: video.publishOptions,
+                coverPath: video.data.coverPath || "",
                 filePath: this.localFilePath,
                 useragent: this.ptConfig[p.pt].useragent,
                 phone: p.phone,
@@ -1901,6 +1974,7 @@ export default {
               bq: video.data.bq,
               creativeStatement: video.data.creativeStatement,
               publishOptions: video.publishOptions,
+              coverPath: video.data.coverPath || "",
               filePath: this.localFilePath,
               publishAttemptCount: oldAttempt + 1,
               republishCount: oldRepublish + 1,
@@ -1936,6 +2010,7 @@ export default {
               bq: video.data.bq,
               creativeStatement: video.data.creativeStatement,
               publishOptions: video.publishOptions,
+              coverPath: video.data.coverPath || "",
               filePath: this.localFilePath,
               useragent: this.ptConfig[p.pt].useragent,
               phone: p.phone,
@@ -2096,6 +2171,40 @@ export default {
       const pathToByName = new Map(
         resolveRes.results.map((r) => [r.fileName, r])
       );
+
+      // 封面解析：绝对路径直接用；相对路径相对视频目录。无效路径直接阻断，
+      // 与 resolveBatchFiles「任何一条匹配不到都不发」同一策略。
+      const fs = require("fs");
+      const nodePath = require("path");
+      const coverErrors = [];
+      const coverResolvedByRow = new Map();
+      filteredRows.forEach((row) => {
+        const raw = String(row.coverPath || "").trim();
+        if (!raw) return;
+        const abs = nodePath.isAbsolute(raw)
+          ? raw
+          : nodePath.join(this.dirPath, raw);
+        let ok = false;
+        try {
+          ok = fs.statSync(abs).isFile();
+        } catch (_) {
+          ok = false;
+        }
+        if (!ok) {
+          coverErrors.push(`${row.fileName}: ${abs}`);
+          return;
+        }
+        coverResolvedByRow.set(row.fileName, abs);
+      });
+      if (coverErrors.length) {
+        this.$message.error(
+          `封面文件不存在（前 5 个）: ${coverErrors.slice(0, 5).join("；")}${
+            coverErrors.length > 5 ? ` 等共 ${coverErrors.length} 个` : ""
+          }`
+        );
+        return;
+      }
+
       this.dirBatchFiles = filteredRows.map((row) => {
         const resolved = pathToByName.get(row.fileName);
         return {
@@ -2104,6 +2213,7 @@ export default {
             ? resolved.matchedFileName || row.fileName
             : row.fileName,
           resolvedPath: resolved ? resolved.resolvedPath : "",
+          coverResolved: coverResolvedByRow.get(row.fileName) || "",
         };
       });
 
@@ -2140,6 +2250,17 @@ export default {
         return;
       }
       const hasVideohao = platforms.some(this.isVideohaoPlatform);
+      if (hasVideohao) {
+        const badCoverRow = this.dirBatchFiles.find(
+          (r) => r.coverResolved && !/\.(jpe?g|png)$/i.test(r.coverResolved)
+        );
+        if (badCoverRow) {
+          this.$message.error(
+            `视频号封面仅支持 jpg/png 格式（文件 ${badCoverRow.fileName}）: ${badCoverRow.coverResolved}`
+          );
+          return;
+        }
+      }
 
       const currentDate = moment().format("YYYY-MM-DD");
       const scheduledAtText = String(this.publishAt || "").trim();
@@ -2242,6 +2363,7 @@ export default {
                   ...metadata.legacy,
                   bq,
                   creativeStatement,
+                  coverPath: fileRow.coverResolved || "",
                   filePath,
                   useragent: this.ptConfig[p.pt].useragent,
                   phone: p.phone,
@@ -2284,6 +2406,7 @@ export default {
               ...metadata.legacy,
               bq,
               creativeStatement,
+              coverPath: fileRow.coverResolved || "",
             },
             textOtherName,
             selectedFile,
@@ -2319,6 +2442,7 @@ export default {
               ...metadata.legacy,
               bq,
               creativeStatement,
+              coverPath: fileRow.coverResolved || "",
               filePath,
               useragent: this.ptConfig[p.pt].useragent,
               phone: p.phone,
@@ -2395,6 +2519,20 @@ export default {
 .file-line {
   margin-bottom: 16px;
   word-break: break-all;
+}
+.cover-field-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.cover-name {
+  font-size: 13px;
+  color: #606266;
+  max-width: 420px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .meta-form {
   margin-bottom: 8px;

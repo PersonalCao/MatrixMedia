@@ -211,11 +211,6 @@ export function parsePublishArgs(subArgv) {
       error: "--dir 批量模式必须同时提供 --config <xlsx路径>",
     };
   }
-  if (out.dir && out.cover) {
-    console.warn(
-      "MatrixMedia: --dir/--config 批量模式暂不支持 --cover，已忽略（批量任务不会设置自定义封面）。"
-    );
-  }
 
   if (!out.partition) {
     if (!out.phone) {
@@ -644,8 +639,10 @@ export function publishHelpText() {
       --cs, --creative-statement <val>  creative statement value for single-file mode.
                             Valid values: none | ai_generated | fiction | marketing | personal_opinion | repost | self_made_no_repost
                             (self_made_no_repost is blbl-only). Default: none.
-      --cover <path>    自定义封面图片路径（抖音/快手/视频号单文件模式生效；竖封面 3:4 比例最佳，
-                            抖音横封面基于竖封面自动生成；视频号仅收 jpg/png）
+      --cover <path>    自定义封面图片路径（抖音/快手/视频号生效；竖封面 3:4 比例最佳，
+                            抖音横封面基于竖封面自动生成；视频号仅收 jpg/png）。
+                            单文件模式传绝对路径；--dir 批量模式下全局覆盖 xlsx「封面」列，
+                            未传时用 xlsx 每行的封面列（相对路径相对视频目录解析）
       --phone <id>      账号手机号（与 GUI 账号树一致，可与 partition 二选一）
       --partition <p>   完整 session partition，如 persist:13800138000抖音
   -t, --title <text>    视频标题（必填）→ data.title
