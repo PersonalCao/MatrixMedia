@@ -19,7 +19,7 @@ const {
   PROBE_SCRIPT,
   COMMENTS_ADAPTERS,
 } = require("./adapters.js");
-const { buildReplyScript } = require("./reply.js");
+const { buildReplySetupScript } = require("./reply.js");
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -178,13 +178,20 @@ async function collectComments({
 
 /**
  * 评论回复（写操作）。默认 execute=false 只做校验（dry-run）。
+ *
+ * 逐条执行 + 增量台账：setup 脚本挂 window.__mmReply.run 后，每条回复单独
+ * executeJavaScript；每条落定（返回/超时/异常）立即回调 onResult（调用方逐条
+ * 写台账），超时或异常即 fail-stop 中止后续——已发送的条目必已入账，
+ * 杜绝整批超时销毁窗口导致的审计缺口。
+ *
  * @param {object} opts
  * @param {string} opts.partition
  * @param {string} opts.platform
  * @param {Array}  opts.replies   回复条目（形状见 reply.js 头注）
  * @param {boolean} [opts.execute] true=真发（需 CLI --execute 显式给出）
  * @param {number} [opts.maxPerRun] 单轮真发上限（默认 5）
- * @param {number} [opts.timeoutMs]
+ * @param {Function} [opts.onResult] 每条结果落定即回调（entry）=>void（增量台账）
+ * @param {number} [opts.timeoutMs] setup 与单条执行的超时（默认 90s）
  */
 async function replyComments({
   partition,
@@ -192,26 +199,82 @@ async function replyComments({
   replies,
   execute = false,
   maxPerRun = 5,
-  timeoutMs = 240000,
+  onResult = null,
+  timeoutMs = 90000,
 }) {
   const meta = PLATFORM_META[platform];
   if (!meta) throw new Error(`暂不支持的平台：${platform}`);
   const adapter = COMMENTS_ADAPTERS[platform];
   const landing = (adapter && adapter.landingPage) || meta.landingPage;
-  const script = buildReplyScript({ platform, replies, execute, maxPerRun });
+  const setupScript = buildReplySetupScript({ platform, maxPerRun });
   const win = makeWindow(partition, meta);
   try {
     await loadAndCheck(win, meta, landing);
-    const result = await Promise.race([
-      win.webContents.executeJavaScript(script, true),
+    const setupInfo = await Promise.race([
+      win.webContents.executeJavaScript(setupScript, true),
       sleep(timeoutMs).then(() => {
-        throw new Error("回复执行超时");
+        throw new Error("回复脚本初始化超时");
       }),
     ]);
-    if (!result || !Array.isArray(result.results)) {
-      throw new Error("回复脚本未返回有效数据");
+    const results = [];
+    const emit = (entry) => {
+      results.push(entry);
+      if (typeof onResult === "function") {
+        try {
+          onResult(entry);
+        } catch (e) {
+          // 台账写失败不中断执行，但必须高声报出（审计缺一条）
+          console.error(
+            "[comments-reply] 台账写入失败（该条未落盘，需人工补记）:",
+            (e && e.message) || e
+          );
+        }
+      }
+    };
+    for (let i = 0; i < replies.length; i++) {
+      const reply = replies[i] || {};
+      let entry;
+      try {
+        entry = await Promise.race([
+          win.webContents.executeJavaScript(
+            `window.__mmReply.run(${JSON.stringify({ ...reply, index: i })}, ${
+              execute ? "true" : "false"
+            })`,
+            true
+          ),
+          sleep(timeoutMs).then(() => {
+            throw new Error("单条回复执行超时");
+          }),
+        ]);
+        if (!entry || typeof entry !== "object") {
+          throw new Error("回复脚本未返回有效数据");
+        }
+      } catch (_) {
+        // fail-stop：该条可能已部分完成发送，先入账再中止本轮。
+        // 带上请求侧标识字段，台账条目自证身份（无需回查 replies 文件对 index）。
+        emit({
+          index: i,
+          platform,
+          commentId: String(reply.commentId || ""),
+          workId: String(reply.workId || ""),
+          workTitle: String(reply.workTitle || ""),
+          matchContent: String(reply.matchContent || "").slice(0, 60),
+          content: String(reply.content || "").slice(0, 80),
+          mode: execute ? "execute" : "dry",
+          status: "error",
+          detail: "执行超时/中断——该条可能已部分完成发送，需人工平台核对",
+        });
+        break;
+      }
+      emit(entry);
     }
-    return result;
+    return {
+      results,
+      extra: {
+        ...(setupInfo && typeof setupInfo === "object" ? setupInfo : {}),
+        executed: results.filter((r) => r.status === "ok").length,
+      },
+    };
   } finally {
     try {
       win.destroy();

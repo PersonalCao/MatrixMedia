@@ -531,7 +531,9 @@ const COMMENTS_ADAPTERS = {
   out.extra.targetCount = targets.length;
   // 自检：全账号零评论时也对首个作品打一次空查，验证端点参数仍有效（errCode 应为 0）
   const verifyList = targets.length ? targets : feeds.slice(0, 1);
+  const seen = new Set();
   for (const feed of verifyList.slice(0, 10)) {
+    if (out.comments.length >= LIMIT) break;
     const exportId = String(feed.exportId || feed.objectId || "");
     if (!exportId) continue;
     const feedTitle = (((feed.desc || {}).description) || "").slice(0, 40);
@@ -544,11 +546,14 @@ const COMMENTS_ADAPTERS = {
       const d = j.data || {};
       if (!out.extra.rawSample) out.extra.rawSample = JSON.stringify(d).slice(0, 2500);
       for (const c of d.comment || []) {
+        const id = String(c.commentId || "");
+        if (!id || seen.has(id)) continue;
+        seen.add(id);
         const ct = __num(c.createTime || c.create_time);
         out.comments.push({
           workId: String(feed.objectId || exportId),
           workTitle: feedTitle,
-          commentId: String(c.commentId || ""),
+          commentId: id,
           content: String(c.content || c.commentContent || c.text || ""),
           nickname: String(c.nickname || c.commentNickname || (c.userInfo && c.userInfo.nickname) || ""),
           authorId: String(c.username || c.finderUsername || (c.userInfo && c.userInfo.username) || ""),
@@ -566,6 +571,7 @@ const COMMENTS_ADAPTERS = {
     }
   }
   out.comments.sort((a, b) => b.createTime - a.createTime);
+  if (out.comments.length > LIMIT) out.comments.length = LIMIT;
   out.extra.total = out.comments.length;
   return out;
 })()

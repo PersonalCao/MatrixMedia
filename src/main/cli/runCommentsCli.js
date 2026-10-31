@@ -95,24 +95,27 @@ export async function runCommentsCli({
       return 2;
     }
     try {
+      // 增量台账：每条结果一到就落盘（fail-stop/超时时已发条目必有记录）
+      const collected = [];
+      let logFile = "";
       const data = await replyComments({
         partition,
         platform,
         replies,
         execute: !!execute,
         maxPerRun: max || 5,
+        onResult: (entry) => {
+          collected.push(entry);
+          // 台账：dry-run 与真发都记（mode 字段区分）
+          logFile = store.appendReplyLog(phone, platform, [
+            { ts: Date.now(), group: phone, platform, ...entry },
+          ]);
+        },
       });
-      // 台账：dry-run 与真发都记（mode 字段区分）
-      const logEntries = (data.results || []).map((r) => ({
-        ts: Date.now(),
-        group: phone,
-        platform,
-        ...r,
-      }));
-      const logFile = store.appendReplyLog(phone, platform, logEntries);
-      const okCount = (data.results || []).filter((r) => r.status === "ok").length;
-      const dryCount = (data.results || []).filter((r) => r.status === "dry_ok").length;
-      const errCount = (data.results || []).filter((r) => r.status === "error").length;
+      const results = Array.isArray(data.results) ? data.results : collected;
+      const okCount = results.filter((r) => r.status === "ok").length;
+      const dryCount = results.filter((r) => r.status === "dry_ok").length;
+      const errCount = results.filter((r) => r.status === "error").length;
       print({
         success: errCount === 0,
         action: "reply",
@@ -120,11 +123,11 @@ export async function runCommentsCli({
         platform,
         mode: execute ? "execute" : "dry",
         ms: Date.now() - startedAt,
-        total: (data.results || []).length,
+        total: results.length,
         ok: okCount,
         dryOk: dryCount,
         errors: errCount,
-        results: data.results,
+        results,
         extra: data.extra,
         logFile,
       });
@@ -201,6 +204,7 @@ export async function runCommentsCli({
     store.writeLatest(phone, platform, payload);
     store.writeMeta(phone, platform, {
       lastCollectAt: data.collectedAt,
+      lastAttemptAt: Date.now(),
       lastError: "",
       count: data.comments.length,
     });
@@ -208,8 +212,9 @@ export async function runCommentsCli({
     return 0;
   } catch (err) {
     const message = (err && err.message) || String(err);
+    // 失败路径只记尝试时间与错误，不覆盖上次成功采集的 lastCollectAt
     store.writeMeta(phone, platform, {
-      lastCollectAt: Date.now(),
+      lastAttemptAt: Date.now(),
       lastError: message,
     });
     print({

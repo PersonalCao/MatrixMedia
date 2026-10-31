@@ -1025,7 +1025,7 @@ export async function runCliMain(argv = process.argv) {
     "comments-reply": "reply",
     "comments-probe": "probe",
   };
-  if (COMMENTS_CMDS[cmd]) {
+  if (Object.prototype.hasOwnProperty.call(COMMENTS_CMDS, cmd)) {
     const parsed = parseCommentsArgs(sub.slice(1), COMMENTS_CMDS[cmd]);
     if (!parsed.ok) {
       console.error(parsed.error);

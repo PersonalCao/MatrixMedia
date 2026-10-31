@@ -16,7 +16,10 @@ function baseDir() {
 }
 
 function safeSeg(name) {
-  return String(name || "未命名").replace(/[\\/:*?"<>|]/g, "_");
+  const seg = String(name || "未命名").replace(/[\\/:*?"<>|]/g, "_");
+  // 防路径穿越/空段："." 与 ".." 会跳出目标目录
+  if (seg === "." || seg === ".." || seg === "") return "_";
+  return seg;
 }
 
 function accountDir(group, platform) {

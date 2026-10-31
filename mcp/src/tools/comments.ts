@@ -1,6 +1,6 @@
 import type { Tool } from '@modelcontextprotocol/sdk/types.js';
 import { runCli } from '../runner.js';
-import { writeFileSync, unlinkSync } from 'node:fs';
+import { writeFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -80,9 +80,11 @@ export async function handleReplyComment(args: Record<string, unknown>): Promise
   if (args.match_content) entry.matchContent = String(args.match_content);
   if (args.root_comment_id) entry.rootCommentId = String(args.root_comment_id);
 
-  const file = path.join(tmpdir(), `mm-reply-${Date.now()}-${process.pid}.json`);
-  writeFileSync(file, JSON.stringify({ replies: [entry] }), 'utf8');
+  // 不可预测的私有临时目录（mkdtemp），replies.json 写在目录内，用完整目录删除
+  const dir = mkdtempSync(path.join(tmpdir(), 'mm-reply-'));
   try {
+    const file = path.join(dir, 'replies.json');
+    writeFileSync(file, JSON.stringify({ replies: [entry] }), 'utf8');
     const cliArgs = [
       'comments-reply',
       '-p', String(args.platform ?? ''),
@@ -93,6 +95,6 @@ export async function handleReplyComment(args: Record<string, unknown>): Promise
     const r = await runCli(cliArgs);
     return fmt(r);
   } finally {
-    try { unlinkSync(file); } catch { /* ignore */ }
+    try { rmSync(dir, { recursive: true, force: true }); } catch { /* ignore */ }
   }
 }

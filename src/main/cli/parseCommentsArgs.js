@@ -56,7 +56,12 @@ export function parseCommentsArgs(subArgv, action) {
     } else if (a === "--execute") {
       out.execute = true;
     } else if (a === "--max") {
-      out.max = Math.max(1, Math.min(20, Number(args[++i]) || 5));
+      const raw = args[++i];
+      const n = Number(raw);
+      if (!Number.isInteger(n) || n < 1) {
+        return { ok: false, error: `--max 需正整数，收到: ${raw}` };
+      }
+      out.max = Math.min(20, n);
     } else if (a === "--fetch") {
       out.fetches = String(args[++i] || "")
         .split(",")
@@ -65,7 +70,12 @@ export function parseCommentsArgs(subArgv, action) {
     } else if (a === "--work") {
       out.work = String(args[++i] || "");
     } else if (a === "--limit") {
-      out.limit = Math.max(1, Number(args[++i]) || 200);
+      const raw = args[++i];
+      const n = Number(raw);
+      if (!Number.isInteger(n) || n < 1) {
+        return { ok: false, error: `--limit 需正整数，收到: ${raw}` };
+      }
+      out.limit = n;
     } else if (a === "--json") {
       out.json = true;
     } else {
