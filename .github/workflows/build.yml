@@ -53,7 +53,9 @@ jobs:
           path: build/MatrixMedia-*-mac-*.dmg
 
   build-linux:
-    runs-on: ubuntu-latest
+    # 固定 24.04：26.04 镜像的 rpmbuild 对 /opt/矩媒 非 ASCII 安装路径构建失败
+    # （v0.13.5 起挂，deb/AppImage 不受影响）；改 ASCII 路径会影响存量 rpm/deb 升级，另行处理
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - name: Set up Node.js
